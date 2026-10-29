@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.tmp
+# never commit game data, dumps, saves or recordings
+*.svdt
+*.nsp
+*.xci
+*.nso
+aoc_out/
+nso/
+handoff/
+recordings/
+screenshots/
+old_versions/
+*.apworld

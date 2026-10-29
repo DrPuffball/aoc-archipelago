@@ -1,0 +1,71 @@
+name: YourName
+game: Hyrule Warriors Age of Calamity
+requires:
+  version: 0.6.7
+
+Hyrule Warriors Age of Calamity:
+  # --- Characters ---
+  starting_character_count: 4          # random starting heroes (1-20)
+  # starting_character_pool: [Link, Impa, Zelda, ...]   # default: all 18 base heroes
+  include_dlc: false                   # true = EX content, DLC weapons, Purah & Robbie, Sooga (they don't show in Allies yet)
+
+  # --- Checks ---
+  side_content: [Challenges, Quests]  # any of Weapons, Challenges, Quests ([] = story only); weapon checks off by default
+  side_check_density: 100              # % of quests/challenges that hold checks (5-100)
+  weapon_items: 20                     # weapons shuffled in as items (0-164)
+  mission_rewards: vanilla             # vanilla | shuffled (each mission gives another's rewards) | none
+
+  # --- Story ---
+  mission_order: shuffle_all           # vanilla | shuffle_within_chapter | shuffle_all (ignored with mission_unlocks: items)
+  first_mission: random_early          # random_early (chapters 1-2) | random_any | vanilla; Hyrule Field comes pre-cleared (starter save)
+  mission_unlocks: items               # story_order | items (each story mission opens with its "Unlock:" item)
+  starting_mission_unlocks: 2          # with items: early-mission unlocks you start with (1-5)
+  side_missions_per_unlock: 0          # >0: each later story slot needs that many side missions per position
+  story_party: free                    # free (any party) | vanilla (story-forced heroes must be unlocked)
+  side_unlocks: shuffled               # shuffled = random challenges/quests open, 2-4 more per completion | game_rules
+  post_story_unlock: 10                # post-story challenges/quests mixed in before the goal (20 = vanilla, no checks on them)
+
+  # --- Goal ---
+  goal: story                          # story | story_and_side_missions | story_and_all_characters | story_and_boss_rush
+  goal_story_missions: 20              # story clears needed (2-20)
+  goal_challenges: 0                   # challenge clears also needed (0-200)
+  goal_side_missions: 25               # used by story_and_side_missions
+  goal_difficulty: any                 # any | easy | normal | hard | very_hard | apocalyptic (harder counts for easier)
+
+  # --- Pace ---
+  minimum_character_level: 1           # heroes are raised to at least this level (1-100)
+  catch_up_levels: true                # new heroes join at your lowest hero's level
+
+  # --- Logic ---
+  challenge_logic: after_story         # game_rules only: after_story | by_level
+  weapon_check_logic: after_story      # after_story | after_character
+
+  # --- Upgrade items ---
+  heart_containers: 1                  # per hero (0-5)
+  combo_upgrades: 5                    # per hero, progressive (0-5)
+  special_gauge_upgrades: 1            # per hero (0-3)
+  enhanced_abilities: 1                # per hero (0-3)
+  weapon_capacity_upgrades: 5          # (0-10)
+  seal_slot_upgrades: 2                # (0-2)
+  weapon_fusion: true                  # true = the Smithy opens with the Weapon Fusion item; false = open from the start
+  locked_features: []                  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian
+  sheikah_runes: shuffled              # vanilla | shuffled | start_with_all
+  # quest_reward_items: {...}          # copies of each quest reward item; default = every quest reward
+
+  # --- Filler ---
+  filler_weights:
+    Character XP Gift: 30
+    Weapon XP Gift: 30
+    Extra Weapon: 10
+    Rupee Pouch: 15
+    Material Bundle: 10
+    Hearty Meal: 5
+  local_filler: false                  # keep all filler in your own world
+  steady_rewards: true                 # story clears never hold your own filler
+  story_pacing: 0                      # % of your heroes/upgrades/weapons spread over the story (0 = random)
+
+  # --- Helpers ---
+  mission_hint_every: 0                # free hint every N story clears (0 = off)
+  stuck_rescue_minutes: 45             # a hint after this many minutes without a new check (0 = off)
+  featured_challenge: false            # one random challenge becomes a priority location
+  death_link: false                    # a death elsewhere ends your mission (restarts it)
