@@ -99,6 +99,21 @@ class TestStoryOnly(AoCTestBase):
         self.assertEqual(len(self.location_names()), len(MISSIONS))
 
 
+class TestStoryOnlyToggles(AoCTestBase):
+    options = {"challenge_checks": False, "quest_checks": False}
+
+    def test_only_missions(self) -> None:
+        self.assertEqual(len(self.location_names()), len(MISSIONS))
+        self.assertEqual(self.world.options.side_content.value, set())
+
+
+class TestWeaponToggle(AoCTestBase):
+    options = {"weapon_checks": True, "challenge_checks": False}
+
+    def test_side_content_from_toggles(self) -> None:
+        self.assertEqual(self.world.options.side_content.value, {"Weapons", "Quests"})
+
+
 class TestShuffledOrder(AoCTestBase):
     options = {"mission_order": "shuffle_all"}
 

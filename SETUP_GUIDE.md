@@ -27,7 +27,7 @@ generates the multiworld (they need the apworld too). Good defaults are already 
 change:
 
 - `starting_character_count`: how many random heroes you start with (default 4).
-- `side_content`: Challenges, Quests, Weapons as checks (default Challenges + Quests).
+- `challenge_checks`, `quest_checks`, `weapon_checks`: which side content holds checks (default: challenges and quests on, weapons off).
 - `mission_unlocks`: `items` = each story mission opens with its own item from the multiworld.
 - `first_mission`: which mission you start on (default a random early one).
 - `goal_story_missions`: how many story missions win the game (default all 20).

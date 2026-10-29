@@ -96,6 +96,16 @@ class AoCCommandProcessor(ClientCommandProcessor):
         found = find_save_files()
         self.output("Age of Calamity saves: " + (", ".join(found) or "none"))
 
+    def _cmd_probe(self, state: str = "") -> None:
+        """Research probe for testers (off by default): records what the game did with each randomizer change in
+        AoC_Archipelago/probe. "/probe on" or "/probe off"; it starts or stops when the game is next found."""
+        from .settings import load_settings, save_setting
+        if state.lower() in ("on", "off"):
+            save_setting("research_probe", state.lower() == "on")
+            if state.lower() == "off" and self.ctx.probe:
+                self.ctx.probe.enabled = False
+        self.output("Research probe: " + ("on" if load_settings().get("research_probe") else "off"))
+
     def _cmd_saves(self) -> None:
         """Which seed each save belongs to, and the saves kept for the seeds you're not playing right now."""
         ctx = self.ctx
@@ -509,6 +519,9 @@ class AoCContext(CommonContext):
         """Passive, read-only research probe (client/probe.py) in its own thread, so it never slows the live hook."""
         from .delivery import STATE_DIR
         from .probe import Probe
+        from .settings import load_settings
+        if not load_settings().get("research_probe"):  # testers only: "/probe on"
+            return
 
         if self._probe_task and not self._probe_task.done():
             return

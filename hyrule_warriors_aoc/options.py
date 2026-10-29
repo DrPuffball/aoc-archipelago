@@ -11,6 +11,7 @@ from Options import (
     Range,
     StartInventoryPool,
     Toggle,
+    Visibility,
 )
 
 from .data import (
@@ -50,14 +51,35 @@ class StartingCharacterPool(OptionSet):
     default = frozenset(BASE_CHARACTERS)
 
 
-class SideContent(OptionSet):
+class WeaponChecks(Toggle):
     """
-    Which kinds of side content hold checks. Any combination works; main story missions always do.
-    Weapons: weapon pickups (off by default: when each weapon drops is not verified). Challenges: challenge missions.
-    Quests: side quests. Korok seeds and treasure chests inside missions stay vanilla (no checks).
+    Weapon pickups hold checks. Off by default: when each weapon drops is not verified.
+    Korok seeds and treasure chests inside missions stay vanilla (no checks). Main story missions always hold checks.
     """
 
-    display_name = "Side Content Checks"
+    display_name = "Weapon Checks"
+
+
+class ChallengeChecks(DefaultOnToggle):
+    """Challenge missions hold checks."""
+
+    display_name = "Challenge Checks"
+
+
+class QuestChecks(DefaultOnToggle):
+    """Side quests hold checks (and quest reward items need this on)."""
+
+    display_name = "Quest Checks"
+
+
+class SideContent(OptionSet):
+    """
+    Older form of the three check toggles above (any of Weapons, Challenges, Quests; [] = story only).
+    If set to anything other than its default, it overrides the toggles. New YAMLs should use the toggles.
+    """
+
+    display_name = "Side Content Checks (old form)"
+    visibility = Visibility.none
     valid_keys = frozenset(SIDE_CATEGORIES)
     default = frozenset({"Challenges", "Quests"})
 
@@ -83,6 +105,7 @@ class IncludeDLC(Toggle):
     """
 
     display_name = "Include DLC"
+    visibility = Visibility.none  # hidden for the public release (DLC heroes do not show in Allies); still read from YAML
 
 
 class MissionOrder(Choice):
@@ -222,7 +245,7 @@ class GoalStoryMissions(Range):
 class GoalChallenges(Range):
     """
     How many challenge missions the goal also needs (any of them; 0 = none). Lowered to the number of challenges in
-    the seed (side_content needs Challenges for any to exist). goal_difficulty applies to these too.
+    the seed (challenge_checks must be on for any to exist). goal_difficulty applies to these too.
     """
 
     display_name = "Goal Challenges"
@@ -552,7 +575,7 @@ class QuestRewardItems(OptionCounter):
     (upgrades) come only from the items; "unlock" groups keep their quests closed until the item arrives (then the
     game's own reward applies); with Shop/Stable Unlock copies a bought shop opens only once its item is in too.
     Default: every quest group itemized except shops and stables (vanilla service). Groups other than the stored
-    upgrades need Quests in side_content.
+    upgrades need quest_checks on.
     """
 
     display_name = "Quest Reward Items"
@@ -567,6 +590,9 @@ class QuestRewardItems(OptionCounter):
 class AgeOfCalamityOptions(PerGameCommonOptions):
     starting_character_count: StartingCharacterCount
     starting_character_pool: StartingCharacterPool
+    weapon_checks: WeaponChecks
+    challenge_checks: ChallengeChecks
+    quest_checks: QuestChecks
     side_content: SideContent
     side_check_density: SideCheckDensity
     include_dlc: IncludeDLC
@@ -612,7 +638,7 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
 
 option_groups = [
     OptionGroup("Characters", [StartingCharacterCount, StartingCharacterPool, IncludeDLC]),
-    OptionGroup("Checks", [SideContent, SideCheckDensity, MissionOrder, FirstMission, MissionUnlocks, StartingMissionUnlocks,
+    OptionGroup("Checks", [WeaponChecks, ChallengeChecks, QuestChecks, SideCheckDensity, MissionOrder, FirstMission, MissionUnlocks, StartingMissionUnlocks,
                            SideMissionsPerUnlock]),
     OptionGroup("Goal and Logic", [Goal, GoalStoryMissions, GoalChallenges, PostStoryUnlock, GoalSideMissions, GoalDifficulty, StoryParty, SideUnlocks, ChallengeLogic, WeaponCheckLogic, SheikahRunes]),
     OptionGroup("Pace", [CatchUpLevels, MinimumCharacterLevel]),
@@ -638,24 +664,23 @@ option_groups = [
 
 presets = {
     # Plain-language entry points; everything else is a detail.
-    "Story": {"side_content": []},
-    "Standard": {"side_content": ["Weapons", "Challenges"], "mission_hint_every": 4},
+    "Story": {"weapon_checks": False, "challenge_checks": False, "quest_checks": False},
+    "Standard": {"weapon_checks": True, "challenge_checks": True, "quest_checks": False, "mission_hint_every": 4},
     "Everything": {
-        "side_content": SIDE_CATEGORIES,
+        "weapon_checks": True, "challenge_checks": True, "quest_checks": True,
         "side_check_density": 100,
-        "include_dlc": True,
         "mission_hint_every": 3,
     },
     "Sync Friendly": {
-        "side_content": ["Weapons", "Challenges", "Quests"],
+        "weapon_checks": True, "challenge_checks": True, "quest_checks": True,
         "side_check_density": 30,
         "mission_hint_every": 2,
         "stuck_rescue_minutes": 30,
         "challenge_logic": "by_level",
     },
-    "Vanilla Feel": {"story_party": "vanilla", "side_content": ["Weapons", "Challenges", "Quests"], "side_unlocks": "game_rules",
+    "Vanilla Feel": {"story_party": "vanilla", "weapon_checks": True, "challenge_checks": True, "quest_checks": True, "side_unlocks": "game_rules",
                      "challenge_logic": "by_level"},
     "Chaos": {"mission_order": "shuffle_all", "side_missions_per_unlock": 2,
-              "side_content": SIDE_CATEGORIES, "challenge_logic": "by_level",
+              "weapon_checks": True, "challenge_checks": True, "quest_checks": True, "challenge_logic": "by_level",
               "locked_features": LOCKABLE_FEATURES},
 }

@@ -26,7 +26,7 @@ config file.
 Your goal is to clear all 20 main story missions, ending with "The Future of Hyrule". Heroes, upgrades, weapons and
 filler are shuffled into the multiworld; the things you accomplish become checks that send items to other players.
 
-**Checks (locations)** - story mission clears always; optionally (any combination, set in `side_content`,
+**Checks (locations)** - story mission clears always; optionally (any combination, set with the `weapon_checks`, `challenge_checks` and `quest_checks` toggles,
 default weapons, challenges and quests): weapon pickups, challenge missions and side quests. When there are more items
 than checks, story clears get bonus checks (spread evenly, sent with the clear) instead of items being handed out.
 With a story-only goal and `weapon_check_logic: after_story`, weapon drops are no checks (they'd only open after the

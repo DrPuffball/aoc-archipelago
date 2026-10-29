@@ -7,10 +7,11 @@ Hyrule Warriors Age of Calamity:
   # --- Characters ---
   starting_character_count: 4          # random starting heroes (1-20)
   # starting_character_pool: [Link, Impa, Zelda, ...]   # default: all 18 base heroes
-  include_dlc: false                   # true = EX content, DLC weapons, Purah & Robbie, Sooga (they don't show in Allies yet)
 
   # --- Checks ---
-  side_content: [Challenges, Quests]  # any of Weapons, Challenges, Quests ([] = story only); weapon checks off by default
+  weapon_checks: false                 # weapon pickups hold checks (off by default)
+  challenge_checks: true               # challenge missions hold checks
+  quest_checks: true                   # side quests hold checks
   side_check_density: 100              # % of quests/challenges that hold checks (5-100)
   weapon_items: 20                     # weapons shuffled in as items (0-164)
   mission_rewards: vanilla             # vanilla | shuffled (each mission gives another's rewards) | none

@@ -31,12 +31,12 @@ from .data_quest_unlocks import GAME_QUEST_PREREQS
 from .data_rewards import ALL_GROUPS, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical, reward_quest_count
 from .data_save import BASIC_WEAPONS
 from .options import (
-    AgeOfCalamityOptions, FirstMission, Goal, MissionOrder, MissionRewards, MissionUnlocks, SheikahRunes, SideUnlocks, StoryParty, option_groups,
+    AgeOfCalamityOptions, FirstMission, Goal, MissionOrder, MissionRewards, MissionUnlocks, SheikahRunes, SideContent, SideUnlocks, StoryParty, option_groups,
     WeaponCheckLogic, presets,
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # (data_challenges: CALAMITY, RESCUES)
-WORLD_VERSION = "0.9.68"
+WORLD_VERSION = "0.9.69"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -159,6 +159,9 @@ class AgeOfCalamityWorld(World):
 
     def generate_early(self) -> None:
         options = self.options
+        if options.side_content.value == SideContent.default:  # the toggles decide unless the old list form was set
+            options.side_content.value = {k for k, on in (("Weapons", options.weapon_checks), ("Challenges", options.challenge_checks),
+                                                          ("Quests", options.quest_checks)) if on}
         dlc = bool(options.include_dlc)
         self.characters = list(ALL_CHARACTERS if dlc else BASE_CHARACTERS)
 

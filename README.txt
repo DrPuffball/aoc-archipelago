@@ -46,7 +46,7 @@ Hyrule Warriors Age of Calamity.yaml (change name:). Give the YAML to whoever ge
 this apworld installed too. The defaults are the tested setup; the options most people change:
 
 - starting_character_count: random heroes you start with (default 4).
-- side_content: Challenges and Quests as checks (default); Weapons optional.
+- challenge_checks / quest_checks / weapon_checks: which side content holds checks (default: challenges and quests on, weapons off).
 - mission_unlocks: items = each story mission opens with its own item from the multiworld; story_order = in order.
 - first_mission: the first mission you play (default a random early one).
 - goal_story_missions: story missions needed to win (default all 20).
@@ -116,8 +116,9 @@ REPORTING PROBLEMS
 ------------------
 
 Open an issue: https://github.com/DrPuffball/aoc-archipelago/issues with: what happened and what you expected, your YAML, the client log (Archipelago's
-logs folder, newest Launcher_*.txt) and %USERPROFILE%\AoC_Archipelago\probe\findings.jsonl (the client's
-recorder notes which of its changes the game kept or undid).
+logs folder, newest Launcher_*.txt).
+Testers can also type /probe on in the client: it then records which of its changes the game kept
+or undid in %USERPROFILE%\AoC_Archipelago\probe\findings.jsonl; attach that file too.
 
 SOURCE
 ------
