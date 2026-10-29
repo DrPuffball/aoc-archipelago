@@ -929,6 +929,9 @@ class AoCContext(CommonContext):
             return
         shelf, me = self._shelf(), self.delivery.state_file.stem
         owner = shelf.owner(path)
+        if (owner == me and self.session.starter_save and starter_save.is_fresh(current)
+                and path not in self.delivery.state.get("starter", {})):
+            owner = None  # claimed during live play before the starter went in (the game made a New Game save)
         action, park, why = starter_save.plan_switch(me, owner, starter_save.is_fresh(current), shelf.has_parked(me),
                                                      self.session.starter_save, force)
         if action == "none":
