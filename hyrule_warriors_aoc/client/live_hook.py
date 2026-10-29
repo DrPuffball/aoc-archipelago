@@ -71,6 +71,7 @@ HERO_EQUIPPED, HERO_WEAPON, HERO_PLAYABLE = 0x10, 0x12, 0x15  # equipped weapon 
 HERO_WEAPON_COUNT = -4  # u32 just before each hero row: weapons owned besides the first (the game's next order number)
 PROFILE = 0x588
 RUPEES, MATERIALS = 0x1E8, 0x3E4
+MATERIALS_SEEN = 0x7A9  # u8 per material: 1 = discovered, else the menu hides it [found in game 2026-10-28; save 0x2C2DD]
 PROFILE_SAVED_COPY = 3 * 0xC30
 QUESTS = 0x560  # quest state bytes at +S.QUEST_STATE_LIVE
 QUEST_SAVED_COPY = 0x2550  # saved copy of the quest states, kept in step
@@ -244,9 +245,12 @@ class LiveGame:
             new = min(S.MATERIAL_MAX, struct.unpack("<H", raw)[0] + amount)
             self._write(base + index * 2, struct.pack("<H", new))
             self._expect_material("Material Bundle", base + index * 2, struct.unpack("<H", raw)[0], new, index)
-        return f"+{amount} each of materials {', '.join(map(str, picks))}"
+        from ..data_materials import MATERIAL_NAMES
+        return f"+{amount} each: {', '.join(MATERIAL_NAMES.get(i, f'material {i}') for i in picks)}"
 
     def _expect_material(self, what: str, addr: int, old: int, new: int, index: int) -> None:
+        self._write(self._ptr(PROFILE) + MATERIALS_SEEN + index, bytes([1]))  # shown in the materials menu
+
         def check():
             raw = self.g.read(addr, 2)
             now = struct.unpack("<H", raw)[0] if raw else None

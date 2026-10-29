@@ -97,7 +97,8 @@ class SavePatch:
         picks = random.Random(seed).sample(L.BUNDLE_MATERIALS, kinds)
         for index in picks:
             self.add_material(index, amount)
-        return f"+{amount} each of materials {', '.join(map(str, picks))}"
+        from ..data_materials import MATERIAL_NAMES
+        return f"+{amount} each: {', '.join(MATERIAL_NAMES.get(i, f'material {i}') for i in picks)}"
 
     def hearty_meal(self) -> str:
         for index, amount in L.HEARTY_MEAL.items():
