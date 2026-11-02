@@ -7,6 +7,7 @@ Hyrule Warriors Age of Calamity:
   # --- Characters ---
   starting_character_count: 4          # random starting heroes (1-20)
   # starting_character_pool: [Link, Impa, Zelda, ...]   # default: all 18 base heroes
+  include_dlc: true                    # Expansion Pass (both waves); false if you don't have it
 
   # --- Checks ---
   weapon_checks: false                 # weapon pickups hold checks (off by default)
@@ -23,22 +24,38 @@ Hyrule Warriors Age of Calamity:
   starting_mission_unlocks: 2          # with items: early-mission unlocks you start with (1-5)
   side_missions_per_unlock: 0          # >0: each later story slot needs that many side missions per position
   story_party: free                    # free (any party) | vanilla (story-forced heroes must be unlocked)
-  side_unlocks: shuffled               # shuffled = random challenges/quests open, 2-4 more per completion | game_rules
+  challenge_unlock_order: randomized   # randomized = a few open, 2-4 more challenges/quests per completion | vanilla
+  quest_unlock_order: randomized       # randomized | vanilla (the game's own quest order)
   post_story_unlock: 10                # post-story challenges/quests mixed in before the goal (20 = vanilla, no checks on them)
 
   # --- Goal ---
-  goal: story                          # story | story_and_side_missions | story_and_all_characters | story_and_boss_rush
-  goal_story_missions: 20              # story clears needed (2-20)
-  goal_challenges: 0                   # challenge clears also needed (0-200)
+  game_mode: standard                  # standard | story_only (every check on story missions, each clear opens the next) | challenges_only (every check on challenges)
+  goal: story                          # story | story_and_side_missions | story_and_all_characters
+  final_mission_goal: true             # The Future of Hyrule opens after the clears below and winning = clearing it
+  goal_story_missions: 28              # story clears needed (2-28; 20 base + 8 DLC; more than the seed has = all)
+  goal_challenges: 0                   # challenge clears also needed (0-168)
+  region_hope_checks: false            # "The Hope of <region>" (100% of a region) holds a check
   goal_side_missions: 25               # used by story_and_side_missions
   goal_difficulty: any                 # any | easy | normal | hard | very_hard | apocalyptic (harder counts for easier)
+  difficulty_checks: off               # off | normal | hard | very_hard: one more check per mission for each harder difficulty
+  difficulty_checks_challenges: true   # challenges get those per-difficulty checks too
+  difficulty_lock: off                 # off | normal | hard | very_hard: clears on easier difficulties count for nothing
 
   # --- Pace ---
   minimum_character_level: 1           # heroes are raised to at least this level (1-100)
   catch_up_levels: true                # new heroes join at your lowest hero's level
+  hero_level_cap: false                # heroes go back to 99 after reaching 100 (level-ups still refill)
+  goal_banner: true                    # goal progress banner at the top of the emulator while on the map
+
+  # --- Open from the start ---
+  start_with_sheikah_sensor: true      # the Sheikah Sensor works from the first mission
+  start_with_trackers: false           # treasure and Korok trackers already done
+  open_stables: true                   # every stable open, no stable checks/items
+  open_shops: true                     # every shop open (but the dye shop), no shop checks/items
+  open_dye_shop: true                  # the dye shop open, no check
 
   # --- Logic ---
-  challenge_logic: after_story         # game_rules only: after_story | by_level
+  challenge_logic: after_story         # with challenge_unlock_order: vanilla: after_story | by_level
   weapon_check_logic: after_story      # after_story | after_character
 
   # --- Upgrade items ---
@@ -48,18 +65,21 @@ Hyrule Warriors Age of Calamity:
   enhanced_abilities: 1                # per hero (0-3)
   weapon_capacity_upgrades: 5          # (0-10)
   seal_slot_upgrades: 2                # (0-2)
-  weapon_fusion: true                  # true = the Smithy opens with the Weapon Fusion item; false = open from the start
-  locked_features: []                  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian
+  weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
+  locked_features: []                  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian (cooking is open unless listed)
   sheikah_runes: shuffled              # vanilla | shuffled | start_with_all
   # quest_reward_items: {...}          # copies of each quest reward item; default = every quest reward
 
   # --- Filler ---
   filler_weights:
-    Character XP Gift: 30
-    Weapon XP Gift: 30
-    Extra Weapon: 10
-    Rupee Pouch: 15
-    Material Bundle: 10
+    Character XP Gift: 20
+    Extra Weapon: 10                       # 1 random weapon for a hero you have
+    Weapon Bundle: 12                      # 3 weapons, for different heroes
+    Large Weapon Bundle: 6                 # 5 weapons, for different heroes
+    Rupee Pouch: 12
+    Small Material Bundle: 15              # 10 each of 3 materials
+    Material Bundle: 20                    # 15 each of 5 materials
+    Large Material Bundle: 10              # 25 each of 8 materials
     Hearty Meal: 5
   local_filler: false                  # keep all filler in your own world
   steady_rewards: true                 # story clears never hold your own filler
@@ -69,4 +89,6 @@ Hyrule Warriors Age of Calamity:
   mission_hint_every: 0                # free hint every N story clears (0 = off)
   stuck_rescue_minutes: 45             # a hint after this many minutes without a new check (0 = off)
   featured_challenge: false            # one random challenge becomes a priority location
-  death_link: false                    # a death elsewhere ends your mission (restarts it)
+  hint_mission_unlocks: false          # free hints for every mission unlock item
+  hint_heroes: false                   # free hints for every hero
+  death_link: false                    # a death elsewhere restarts your mission (ignored outside missions)

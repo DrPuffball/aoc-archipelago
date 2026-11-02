@@ -93,7 +93,7 @@ class SavePatch:
         struct.pack_into("<H", self.data, L.MATERIALS + index * 2, new)
         self.data[L.MATERIAL_SEEN + index] = 1  # the editor does this for first-time materials
 
-    def material_bundle(self, seed: int, kinds: int = 3, amount: int = 5) -> str:
+    def material_bundle(self, seed: int, kinds: int = 5, amount: int = 15) -> str:
         picks = random.Random(seed).sample(L.BUNDLE_MATERIALS, kinds)
         for index in picks:
             self.add_material(index, amount)

@@ -1,0 +1,209 @@
+# Hyrule Warriors: Age of Calamity - reverse-engineering notes
+
+This file explains how the game keeps its state and how the Archipelago client reads and changes it. It is written
+for the next person (human or AI) working on this project. Read it before changing anything in `hyrule_warriors_aoc/client`.
+
+All addresses are for **game version 1.4.1** (main NSO build id `e5f275b5...`). The code is the source of truth:
+every constant below also lives in the client (`client/live_hook.py`, `client/ryujinx.py`, `data_save.py`,
+`data_rewards.py`), usually with a comment saying how it was found.
+
+Confidence labels used throughout:
+- **[confirmed]** seen working in the running game (usually by writing it and watching the result)
+- **[read]** read from game data, code or memory, but the effect has not been tested by writing it
+- **[guess]** inferred from a pattern; needs a test
+
+No game files, dumps or saves are part of this repository. To repeat the static work you need your own legally
+dumped copy of the game (RomFS + ExeFS).
+
+---
+
+## 1. Getting at the game's memory
+
+The client never patches the game. It reads and writes the emulator's process memory (Windows, `ReadProcessMemory`
+/ `WriteProcessMemory`), so everything here is about finding guest (Switch) addresses inside the emulator process.
+
+The game's main module is called "the module" below. All module-relative addresses assume the module's guest
+address in Ryujinx, `MODULE_BASE = 0x8504000`.
+
+### Ryujinx (tested on 1.3.3)
+- Memory Manager Mode must be **Software**. Ryujinx then keeps a page table in its own memory: one u64 per 4 KiB guest
+  page holding that page's host address.
+- To find the table, the client looks at each large allocation, takes the entry for the page of the game's save
+  writer function (module + `0x9ACF60`), and checks whether that host page holds the function's first 64 bytes
+  (`WRITER_SIG`). [confirmed]
+
+### Eden (tested on 0.2.1; yuzu family)
+- With "fastmem" on (the default; CPU accuracy Auto), guest address `g` lives at host `arena + g`. [confirmed]
+- The arena start is **not** a memory-region boundary, so it can't be found directly. The module, however, starts
+  exactly at a committed region. Reading `WRITER_SIG` at `region + 0x9ACF60` for each region finds it with one read
+  per region. [confirmed]
+- The module loads at a different guest address than in Ryujinx (`0x8071A000` seen). The slot at module offset
+  `0x263E000` (start of `.data`) holds its own guest address, so `M = [module + 0x263E000] - 0x263E000` and
+  `arena = module host - M`. [confirmed]
+- Module-relative addresses are relocated by `M - MODULE_BASE`. Heap pointers read from memory are real guest
+  addresses and need no change.
+- A loose "save loaded" check passes on empty memory. The client validates a layout with `LiveGame.save_ok()`: the
+  save blocks have distinct pointers, the quest states vary and start with 1, and a mission is cleared.
+- Eden's DLC record: `cache/game_list/01002B00111A2000.pv.txt` lists add-ons (`DLC (1, 1, 2, 2, 3, 3, 4, 4)`; 3 =
+  Pulse of the Ancients, 4 = Guardian of Remembrance). `config/qt-config.ini [DisabledAddOns]` lists ones turned
+  off. Ryujinx: `games/01002b00111a2000/dlc.json`.
+- Saves: Ryujinx `bis/user/save/<id>/0/svdt` (`/1` is a working copy); Eden
+  `nand/user/save/0000000000000000/<user id>/01002B00111A2000/svdt`.
+
+---
+
+## 2. The save manager and its blocks
+
+`P = [module + 0x2780A48]` is the game-state manager. Most save-backed data hangs off it: `[P + field]` points to a
+block. Several blocks keep a "saved copy" that the game copies back on save or load, so the client writes both.
+[confirmed for each block it writes]
+
+| field | block | contents |
+|---|---|---|
+| `0x550` | story flags | one byte per story flag at `+0x18C` (save `0x14..0x8F`); copies 0x700 apart (0 current, 3 saved). Rune flags at `+0x18C+5..8` = Remote Bombs, Cryonis, Magnesis, Stasis [confirmed] |
+| `0x560` | quests | quest state bytes at `+0x809` (1101 entries; 1 not available, 2 available, 3 done); saved copy `+0x2550` [confirmed] |
+| `0x568` | weapon pools | `[[pool+0x30]]` current, `[[pool+0x48]]` saved; 2139 records x 0x90, 71 per hero; `+0x0C` XP (u32), `+0x10` kind (u16), `+0x14` attack bonus (u16; shown damage = base + this), `+0x78` level - 1, `+0x87` rusted (1 = hidden until restored) [confirmed 2026-11-02]. The game recomputes level and attack bonus from XP (fusing did it), so a level written without XP lasts only until then. `+0x79` is not the level (meaning unknown) |
+| `0x570` | ? | dye colours suspected around `+0x2D73` [guess] |
+| `0x578` | research | Sheikah Sensor levels at `+0x780/+0x781/+0x783` [read] |
+| `0x580` | heroes | rows at `+0x224`, 0x20 each, slot order below; saved copy `+3*0x560` [confirmed] |
+| `0x588` | profile | rupees u32 `+0x1E8`; materials u16 `+0x3E4 + 2*i`; "discovered" u8 `+0x7A9 + i`; combo levels `+0x73B + category`; copies at stride `0xC30` (copy 3 = saved) [confirmed] |
+| `0x598` | missions | live mission records at `+0xE08`, 0xF4 each; six u32 clear times per difficulty just before (`-0x10`) [confirmed] |
+| `0x5A0` | flags | general flags, e.g. max weapon level `+0x63F`; saved copy `+0x19B0` [confirmed for the ones the client writes] |
+| `0x5A8` | map state | world-map cursor: u16 id `+0x148`, kind byte `+0x14A` (2 story, 3 challenge, 4 quest); per-mission map states `+0x14C`, `+0x81C` [confirmed]; quest icons at `+0x2DC + quest id` (saved copy `+0x6D0`; 3 = done/grey, 2 = available/orange): a hand-in sets these as well as the quest block [confirmed 2026-11-02] |
+
+Hero row (live, 0x20 bytes): `+0x04` XP u32, `+0x08` hearts/ATK/DEF u16 x3, `+0x0E` level-1, `+0x10` equipped weapon
+type, `+0x15` playable, `+0x16..0x18` roster flags. Hero slots: Link 0, Zelda 1, King Rhoam 2, Mipha 3, Daruk 4,
+Revali 5, Urbosa 6, Impa 7, Sidon 8, Yunobo 9, Teba 10, Riju 11, Hestu 12, Great Fairies 13, Master Kohga 14, Monk Maz
+Koshia 15, Terrako 16, Calamity Ganon 17, (18 Battle-Tested Guardian), Purah & Robbie 19, Sooga 20.
+
+XP per level and hearts per level come from the game's own table (LinkData2 `007bd714`; `data_save.HERO_XP_TABLE`,
+`HERO_HEARTS_TABLE`). ATK and DEF rise by 3 per level. [confirmed by recorded level-ups]
+
+### Battle, HP and DeathLink
+- Battle object `B = [[module + 0x2B63708] + 0x30]`, controlled character `[B + 0x8]`, display HP float `+0x28`,
+  max `+0x2C` (400 per heart). Outside missions a stale object can remain, so a valid battle needs a sane max HP
+  (400..60000). [confirmed]
+- Real HP: unit table `[[module + 0x2780A80] + 0x8] + 0x176E70 + unit*0x6C`, HP float at `+0x44`. [confirmed]
+- Mission flow: u32 at `[module + 0x2780A80] + 0xB0` (low byte 0 playing, 4 defeated, 12 retry). Writing a request
+  at `+0xB8` (flag byte 2 at `+0xB3`) is taken next frame. 4 then 12 = defeat + retry; 4 alone soft-locks.
+  [confirmed] Divine Beast battles have no defeat screen; the client restores HP if the defeat is never taken.
+
+### Game data tables in memory
+`[[module + 0x2780A38] + field] + 0x60`: `0x698` mission parameters (400 rows), `0x308` mission unlock table
+(which clears open a mission), `0x300` quest unlock table (1000 x 36 bytes; `+4` five u16 records, `+14` five u16
+quests needed). The client rewrites rows of these tables to change unlock order. [confirmed]
+
+---
+
+## 3. The save file (`svdt`, 1 MiB, unencrypted, no checksum)
+
+- Byte 0 = format `0x89`. Mission records: 400 x 0x84 at `0x2CF34`. A mission is cleared when any of the six u32 at
+  `record+4` is non-zero (slot 0 Easy, 1 Normal, 2 Hard, 3 Very Hard). [confirmed]
+- Record numbers come from the game's mission text table (LinkData2). Two-part story missions have two records, and
+  both must be cleared. Mapping: `data_save.MISSION_RECORD_IDS`.
+- Rupees u32 `0x2C3A4`; materials u16 `0x2C14E + 2*i`; discovered `0x2C2DD + i`; heroes 30-byte rows at `0x2BCAD`.
+  [confirmed; partly from a public save editor]
+- The client edits the file only while no emulator runs the game. A starter save (the first mission pre-cleared)
+  lets a seed skip the forced opening.
+
+---
+
+## 4. Quests and their rewards
+
+Static data: the quest table (LinkData2 `0086ee94`, 1000 rows x 80 bytes after a 16-byte header; row index = quest
+state id).
+- `+0x10` cost amounts (u16 x6) and `+0x26..+0x2A` material ids.
+- `+0x1E` **reward type** (inventory in `tools/QUEST_TYPES.md`).
+- `+0x30..+0x3F` type-specific parameters.
+
+| type | reward | where it lands | status |
+|---|---|---|---|
+| 1 | combo upgrade | profile `+0x73B + category` | [confirmed] client forces |
+| 2 | enhanced ability | profile `+0x121 + category` | [confirmed] |
+| 3 / 4 | hearts / special gauge | profile `+0xAFC + hero` / `+0xB19 + hero` | [confirmed] |
+| 15 | weapon capacity | profile `+0x7A6` tier | [confirmed] |
+| 16 | shops | follow the quest state (+ flags `0x319..0x323` [read]) | [confirmed] |
+| 17 | stables | quest state + flag pair (e.g. `0x5BB` on, `0x72E` off) [read] | partly |
+| 18 / 19 | regional discounts | counters = number of the type's quests handed in: flags `0x5DA/0x5DB/0x5DC/0x5DE` type 18 (Rebuilding Akkala Bridge raised all four 3 -> 4), `0x5D9/0x5DD` type 19 (Great Bridge Repairs, What Bad Weather?, The Lazy Guards, The Marita Exchange) | [confirmed for 18; 19 by the same rule] |
+| 29 | Sheikah Sensor | profile `+0xC7B` = 1 | [read] |
+| 30 | sensor research | research `+0x780/+0x781/+0x783` = row `+0x34..+0x36` (1/1/1, 3/3/2, 4/4/2) | [read] |
+| 32 / 34 | cooking / recipes | profile `+0x2B5 + row[+0x38]` = 1 (matches all 19 measured) | [read] |
+| 33 | cooking lesson | row `+0x37` = 1; Snowbound Cook flag `0x643` | [guess] |
+| 43 | Divine Beast upgrade | row `+0x3B` = beast 1..4; profile `0x871 + beast` = 1 | [confirmed: Surveying the Volcano set 0x873] |
+| 35, 36, 48, ... | Maz Koshia trial, research, dyes, ... | see `tools/QUEST_TYPES.md` | unknown |
+
+How the client uses this (`data_rewards.py`):
+- **store** groups: the reward item sets the bytes; the client forces them to what the received items give.
+- **quest** groups: the service follows the quest state, opened once the item arrives.
+- **unlock** groups: stopgap while the reward is unknown; the quest is locked until its item arrives.
+- When two groups touch one byte, the higher value wins. A vanilla-completed quest of an inactive group keeps its
+  reward.
+- `data_save.QUEST_EFFECTS` holds bytes the client sets when it marks a quest done itself (open from the start, or
+  collected by another player's release).
+
+---
+
+## 5. Tools
+
+The client and probe ship in this repository. The research scripts under `tools/` are kept in the project's working
+folder and are not published yet (they expect local game dumps); they are listed so their role is known.
+
+- `client/probe.py`: **the research probe** (`/probe on` in the client). It is read-only and writes JSON lines to
+  `%USERPROFILE%/AoC_Archipelago/probe/`. Findings:
+  - `quest_done`: save-block diff at each quest hand-in; the main way rewards are found.
+  - `state_change`: save changes on the map outside quest hand-ins (menu choices, unlocks).
+  - `mission_start` / `mission_end`: diffs around a battle, with the map cursor.
+  - `clear_slot`: difficulty slot of each clear.
+  - `effect`: every client write re-checked after 20 s / 5 min / after a mission.
+  - `reverted` / `fight`: the game undoing a client write.
+  - `game_lost`: the client's last writes when the game disappears.
+  - `level_up`, `ko`, `runes`, `deathlink`, `check`, `received`.
+- `tools/aoc_extract.py`, `aoc_unchunk.py`: unpack LinkData2 (chunked zlib) into its ~2228 tables.
+- `tools/aoc_dis.py`, `a64.py`, `aoc_xref.py`: ARM64 disassembly and cross-references over the NSO.
+- `tools/aoc_mem.py`, `aoc_recorder.py`, `aoc_hunt.py`, `aoc_snap.py`: older live-memory scanners and recorders,
+  from before the probe existed.
+- `tools/make_starter_save.py`: builds the starter save template.
+
+### Research method that works
+1. Check the quest table and game data first. A row parameter often names the exact byte (recipes, sensor).
+2. Turn the probe on and do one thing in game: one hand-in, one menu change, one mission.
+3. Read `findings.jsonl`. Separate materials and rupees (the costs) from reward bytes. A byte with a twin at
+   `+0x2490` (profile) is that byte's saved copy.
+4. Test by writing on a backed-up save. Record the result as [confirmed] in this file and in `tools/RESEARCH.md`.
+
+---
+
+## 6. Open questions
+
+- EX Alert sightings: where the game stores the monster an Alert gets (needed before Alerts can be checks or
+  open from the start).
+- Battle-Tested Guardian's combo / ability category is 26 by elimination [guess]; confirm with its quests.
+- The difficulty selector byte. Not in any block under the save manager or the param holder (about 400 blocks,
+  0x8000 each, diffed across Hard / Very Hard / Easy on 2026-11-02): only the save timestamp changed (manager
+  `+0x740` u32 ticks, `+0x744` year u16, then month, day, hour, minute bytes). Probably the system/options data.
+- The weapon XP curve (XP -> level, per weapon; samples: 644 XP = level 13 on one weapon, 655 = level 12 on the
+  Master Sword). Would allow a weapon level gift that lasts past a fusion (dropped for weapon bundles in 0.9.74).
+- Terrako's level only showing after a reload: what refreshes the hero display.
+- Rewards still unknown: research quests (type 36), Maz Koshia trials (35), dyes (48), training lessons (31),
+  cooking lessons (33).
+- DLC (2026-11-02, both waves installed, Eden) [confirmed]: opening EX missions works like base ones (unlock row
+  zeroed + the four state lists = 2); EX quests like base quests (quest state 2 + map icon 2). Purah & Robbie (slot 19)
+  and Sooga (slot 20) show on the hero list when granted like any hero; the earlier "not shown" result was with Pulse
+  of the Ancients missing. Battle-Tested Guardian = hero slot 18, weapon type `+0x12` = 221 (types step by 10 per slot),
+  starter weapon kind 371 (Battle-Tested Screw); granted the same way, it shows and is playable. EX Alerts other
+  than Forgotten Temple (the Guardian fight) need a sighting: forced open without one, the mission crashed loading.
+- Service flags [confirmed 2026-11-02]: flags `0x318 + service id` (quest table type 16 row `+0x32`): shops 1-6,
+  Smithy 8 (`0x320`), dye shop 9, Military Training Camp 10 (`0x322`), Relief for Soldier Stress 11. The facility only
+  appears on the map with its flag set; marking the quest done alone left the Training Camp missing.
+- Challenge forced parties: mission parameter table `t009cc294` `+71..+74` (support `+75..+79`), 71 challenge
+  records force heroes (shipped as data_save.VANILLA_CHALLENGE_PARTY); the client swaps in your heroes like the story.
+- EX Safe Roads, Safe Rides (411) and EX Burning Desire (433), both type 1: combo-upgrade category 24 went 5 -> 6 and
+  27 0 -> 1 (profile `0x73B + category`), plus profile `0x398`/`0x399` 0 -> 1, `0xAF8` 1 -> 19, flags `0xF2E` 0 -> 1
+  [read, one hand-in pass; which byte belongs to which quest not separated].
+- 2026-11-02: forcing every mission/challenge/quest open (unlock rows zeroed, 118 states set) while the player was
+  handing in a quest froze the game (Eden). The save on disk was untouched. Never rewrite the quest unlock table or
+  quest states during a hand-in; retest the force-open in steps with the player idle.
+- Random emulator crashes reported by one player: no data yet (the probe's `game_lost` exists for this).
+
+The chronological lab notebook with every session's raw findings is kept privately (`tools/RESEARCH.md`, not
+published, since it holds local paths). This file is its curated summary.

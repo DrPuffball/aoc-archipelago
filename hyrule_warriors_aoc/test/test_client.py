@@ -11,7 +11,8 @@ from ..data import MISSIONS, WEAPONS
 
 class SessionTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"first_mission": "vanilla", "side_content": ["Weapons", "Challenges", "Quests"], "weapon_check_logic": "after_character"}
+    options = {"first_mission": "vanilla", "side_content": ["Weapons", "Challenges", "Quests"], "weapon_check_logic": "after_character",
+               "include_dlc": False}  # the base story's flow
 
     def make_session(self) -> Session:
         # Round-trip through JSON: the real client receives slot_data over the wire.
@@ -66,13 +67,13 @@ class SessionTests(WorldTestBase):
 
 class SessionExtrasTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"goal": "story_and_boss_rush", "mission_hint_every": 2, "side_content": ["Challenges"],
+    options = {"mission_hint_every": 2, "side_content": ["Challenges"], "include_dlc": False,
                "featured_challenge": True}
 
     def make_session(self) -> Session:
         return Session(json.loads(json.dumps(self.world.fill_slot_data())))
 
-    def test_boss_rush_goal_and_hints_and_tracker(self) -> None:
+    def test_goal_and_hints_and_tracker(self) -> None:
         session = self.make_session()
         session.unlocked_characters |= {"Mipha", "Daruk", "Revali", "Urbosa"}  # (Calamity Strikes needs them)
         self.assertEqual(session.hints_due(), 0)
@@ -80,13 +81,8 @@ class SessionExtrasTests(WorldTestBase):
             session.on_mission_cleared(session.available_missions()[0])
         self.assertEqual(session.hints_due(), len(MISSIONS) // 2)
         self.assertEqual(session.hints_due(), 0)
-        self.assertFalse(session.goal_complete)
-        for boss in session.boss_rush:
-            session.on_challenge_cleared(boss)
         self.assertTrue(session.goal_complete)
-        html = session.tracker_html()
-        self.assertIn("Boss rush 18/18", html)
-        self.assertIn("COMPLETE", html)
+        self.assertIn("COMPLETE", session.tracker_html())
 
 
 class NoticeTests(unittest.TestCase):
@@ -230,14 +226,20 @@ class ChallengeUnlockTests(WorldTestBase):
         unlocks = self.make_session().challenge_unlocks()
         self.assertEqual(unlocks[158], (2,))  # Mastering Remote Bombs: Road to the Ancient Lab
         self.assertEqual(unlocks[102], (13,))  # Anti-Flame Training: II drops Anti-Flame Training: I
-        self.assertEqual(unlocks[186], (15,))  # Trial of the Ancients (Destroy the Yiga Clan! part 2): quests dropped
+        self.assertEqual(unlocks[186], (186,))  # Trial of the Ancients: closed until its three trial quests are done
+        session = self.make_session()
+        session.done["quest"] |= {"The Trial of Monsters", "The Trial of Stones", "The Trial of the Mighty Foe"}
+        self.assertEqual(session.challenge_unlocks()[186], (15,))  # then Destroy the Yiga Clan! part 2, as vanilla
         self.assertEqual(unlocks[167], (28,))  # Hair-Width Trial: Expert+ needed only a challenge: the final mission
         self.assertNotIn(30, unlocks)  # Meditative Training is open from the start in vanilla
-        self.assertTrue(all(r <= 28 for needs in unlocks.values() for r in needs))
+        from ..data_save import MISSION_RECORD_IDS
+        dlc_story = {MISSION_RECORD_IDS[n][0] for n in self.world.dlc_story}  # (the game's own DLC chain)
+        self.assertTrue(all(r <= 28 for k, needs in unlocks.items() if needs != (k,) and k not in dlc_story for r in needs))
 
     def test_challenge_waits_for_its_forced_heroes(self) -> None:
         from ..data_save import MISSION_RECORD_IDS
         session = self.make_session(every_hero=False)
+        session.story_party_free = False  # story_party vanilla (free parties open it with your heroes)
         session.unlocked_characters = {"Daruk"}
         self.assertEqual(session.challenge_unlocks()[136], (136,))  # Link-only: closed until Link (plays broken)
         bows = MISSION_RECORD_IDS["Zelda's Training: Bows"][0]
@@ -261,7 +263,13 @@ class ChallengeUnlockByLevelTests(WorldTestBase):
         self.assertEqual(unlocks[158], (1,))  # Mastering Remote Bombs: The Battle of Hyrule Field
         for name in self.world.active_challenges:
             record = MISSION_RECORD_IDS[name][0]
-            if record not in unlocks:
+            if record not in unlocks or name in session.challenge_quests:  # (those wait for their quests)
+                continue
+            if name in session.dlc_story:  # Guardian of Remembrance: the game's own row (story and DLC records)
+                import struct
+                from ..data_save import VANILLA_CHALLENGE_UNLOCK
+                row = struct.unpack_from("<5H", bytes.fromhex(VANILLA_CHALLENGE_UNLOCK[record]))
+                self.assertEqual(unlocks[record], tuple(r for r in row if r), name)
                 continue
             gate = challenge_requirements(self.world, name)[0]
             if gate not in (STORY_EVENT, POST_STORY_EVENT):
@@ -321,15 +329,16 @@ class RuneVanillaTests(WorldTestBase):
 
 class MissionUnlockItemTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"first_mission": "vanilla", "mission_unlocks": "items", "starting_mission_unlocks": 1, "mission_order": "shuffle_all",
+    options = {"final_mission_goal": False, "first_mission": "vanilla", "mission_unlocks": "items", "starting_mission_unlocks": 1, "mission_order": "shuffle_all",
                "side_content": ["Challenges", "Quests"]}
 
     def test_every_mission_but_the_first_has_an_unlock_item(self) -> None:
         names = [i.name for i in self.multiworld.get_items() if i.player == self.player]
         names += [i.name for i in self.multiworld.precollected_items[self.player]]
         unlocks = sorted(n for n in names if n.startswith("Unlock: "))
-        self.assertEqual(unlocks, sorted(f"Unlock: {m.name}" for m in MISSIONS[1:]  # (these open by themselves)
-                                         if m.name not in ("Calamity Strikes", "Water and Fire", "Air and Lightning")))
+        from ..data_challenges import DLC_STORY_MISSIONS  # (include_dlc, the default: Guardian of Remembrance too)
+        self.assertEqual(unlocks, sorted([f"Unlock: {m.name}" for m in MISSIONS[1:]]
+                                         + [f"Unlock: {m}" for m in DLC_STORY_MISSIONS]))
         self.assertEqual(self.world.mission_order, [m.name for m in MISSIONS])  # mission_order is ignored
         self.assertEqual(len(self.world.starting_unlocks), 1)
         start = self.world.starting_unlocks[0]
@@ -372,7 +381,7 @@ class DlcVanillaTests(WorldTestBase):
 
 class HeroBonusTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"heart_containers": 2, "special_gauge_upgrades": 1}
+    options = {"heart_containers": 2, "special_gauge_upgrades": 1, "include_dlc": False}
 
     def test_hearts_and_gauges_follow_received_items(self) -> None:
         from ..data_save import HERO_SLOTS
@@ -386,7 +395,7 @@ class HeroBonusTests(WorldTestBase):
 
 class ProfileRewardTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"enhanced_abilities": 1, "weapon_capacity_upgrades": 4}
+    options = {"enhanced_abilities": 1, "weapon_capacity_upgrades": 4, "include_dlc": False}
 
     def test_abilities_and_capacity_follow_received_items(self) -> None:
         from ..data_save import ABILITY_FLAGS, WEAPON_CAPACITY_LEVEL
@@ -433,7 +442,7 @@ class QuestRewardDataTests(unittest.TestCase):
 class QuestRewardTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
     # old item names on purpose: YAMLs written before the 0.9.52 rename must keep working
-    options = {"side_unlocks": "game_rules", "side_content": ["Quests"], "quest_reward_items": {"Progressive Hot Springs": 3,
+    options = {"open_shops": False, "open_stables": False, "open_dye_shop": False, "start_with_sheikah_sensor": False, "side_unlocks": "game_rules", "side_content": ["Quests"], "quest_reward_items": {"Progressive Hot Springs": 3,
                                                                   "Progressive Shop Unlock": 4,
                                                                   "Progressive Treasure Detector": 2}}
 
@@ -449,7 +458,7 @@ class QuestRewardTests(WorldTestBase):
         self.assertNotIn("Progressive Stable Unlock", names)
         self.assertEqual(self.world.fill_slot_data()["quest_reward_items"],
                          {hot: 3, "Progressive Shop Unlock": 4, detector: 2,
-                          seals: 2, "Feature: Cooking": 1,
+                          seals: 2,
                           "Feature: Terrako Guardian": 1})
 
     def test_shop_quests_are_checks_and_their_service_needs_the_item(self) -> None:
@@ -468,6 +477,22 @@ class QuestRewardTests(WorldTestBase):
             self.assertTrue(buy(state), k)  # buyable without the item
         state.prog_items[self.player]["Progressive Shop Unlock"] = 4
         self.assertTrue(rule(state))
+
+    def test_shared_discount_counter_counts_free_quests(self) -> None:
+        """Type-19 discounts share one counter: the Great Bridge Repairs item must not erase The Marita Exchange's
+        (2026-11-02 the client reset it to 0 the moment Marita was handed in)."""
+        from ..data_rewards import FLAGS, PROFILE
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.reward_copies["West Hyrule Shop Discount (Great Bridge Repairs)"] = 1
+        session.game_done |= {"The Marita Exchange", "What Bad Weather?", "Great Bridge Repairs"}
+        writes = session.reward_writes()
+        self.assertEqual((writes[(FLAGS, 0x5D9)], writes[(FLAGS, 0x5DD)]), (2, 2))  # its own quest: no item yet
+        session.apply_received_item_names(["West Hyrule Shop Discount (Great Bridge Repairs)"])
+        self.assertEqual(session.reward_writes()[(FLAGS, 0x5D9)], 3)
+        session.reward_copies["Progressive Divine Beast Upgrade"] = 4
+        session.apply_received_item_names(["Progressive Divine Beast Upgrade"])
+        writes = session.reward_writes()
+        self.assertEqual([writes[(PROFILE, 0x871 + n)] for n in range(1, 5)], [1, 0, 0, 0])
 
     def test_client_forces_rewards_and_services(self) -> None:
         from ..data_rewards import PROFILE
@@ -498,16 +523,17 @@ class QuestRewardTests(WorldTestBase):
 
 class QuestRewardVanillaTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"side_unlocks": "game_rules", "side_content": ["Quests"], "quest_reward_items": {}, "weapon_fusion": False, "seal_slot_upgrades": 0,
+    options = {"open_shops": False, "open_stables": False, "open_dye_shop": False, "start_with_sheikah_sensor": False,
+               "side_unlocks": "game_rules", "side_content": ["Quests"], "quest_reward_items": {}, "weapon_fusion": False, "seal_slot_upgrades": 0,
                "locked_features": []}
 
     def test_no_items_and_client_leaves_rewards_alone(self) -> None:
-        from ..data_rewards import REWARD_BY_ITEM
+        from ..data_rewards import OPEN_SERVICE_QUESTS, REWARD_BY_ITEM
         names = {i.name for i in self.multiworld.get_items() if i.player == self.player}
         self.assertFalse(names & set(REWARD_BY_ITEM))
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         self.assertEqual(session.reward_writes(), {})
-        self.assertEqual(set(session.quest_states()), {"Brawny Blacksmiths", "Entrance Test"})
+        self.assertEqual(set(session.quest_states()), session.open_quests)
         self.assertIn("Brilliance for the Boutique", self.world.checked_quests)
 
 
@@ -548,32 +574,32 @@ class MissionRewardVanillaTests(WorldTestBase):
 
 class QuestUnlockTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"side_unlocks": "game_rules", "side_content": ["Quests"], "quest_reward_items": {"Progressive Divine Beast Upgrade": 4}}
+    options = {"side_unlocks": "game_rules", "side_content": ["Quests"], "quest_reward_items": {"Progressive Maz Koshia Trial": 4}}
 
     def test_unlock_quests_stay_checks_gated_by_their_item(self) -> None:
-        quest = "Surveying the Volcano"  # 2nd Divine Beast quest: needs 2 copies
+        quest = "The Trial of Monsters"  # 2nd Maz Koshia quest: needs 2 copies
         self.assertIn(quest, self.world.checked_quests)
-        self.assertIn("Progressive Divine Beast Upgrade", self.world.reward_progression)
+        self.assertIn("Progressive Maz Koshia Trial", self.world.reward_progression)
         rule = self.world.get_location(f"Quest: {quest}").access_rule
         state = self.multiworld.get_all_state(False)  # everything, then only the unlock item's count varies
-        state.prog_items[self.player]["Progressive Divine Beast Upgrade"] = 1
+        state.prog_items[self.player]["Progressive Maz Koshia Trial"] = 1
         self.assertFalse(rule(state))
-        state.prog_items[self.player]["Progressive Divine Beast Upgrade"] = 2
+        state.prog_items[self.player]["Progressive Maz Koshia Trial"] = 2
         self.assertTrue(rule(state))
 
     def test_client_hides_then_opens(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         states = session.quest_states()
-        self.assertEqual(states["Regulating the Reservoir"], -1)
-        session.apply_received_item_names(["Progressive Divine Beast Upgrade"])
+        self.assertEqual(states["Offering Help on the Road"], -1)
+        session.apply_received_item_names(["Progressive Maz Koshia Trial"])
         states = session.quest_states()
-        self.assertEqual((states["Regulating the Reservoir"], states["Surveying the Volcano"]), (2, -1))
+        self.assertEqual((states["Offering Help on the Road"], states["The Trial of Monsters"]), (2, -1))
 
 
 
 class FeatureItemTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"side_unlocks": "game_rules", "side_content": ["Quests", "Challenges"], "challenge_logic": "by_level",
+    options = {"open_shops": False, "open_stables": False, "open_dye_shop": False, "start_with_sheikah_sensor": False, "side_unlocks": "game_rules", "side_content": ["Quests", "Challenges"], "challenge_logic": "by_level",
                "locked_features": ["Cooking", "Shops", "Fairy Fountains", "Terrako Guardian"], "weapon_fusion": True}
 
     def test_features_drive_quests_and_challenges(self) -> None:
@@ -623,10 +649,24 @@ class DifficultyGoalTests(WorldTestBase):
         session.difficulty_cleared = set(session.mission_ids)
         self.assertTrue(session.goal_complete)
 
+    def test_goal_shown_with_its_difficulty(self) -> None:
+        """User 2026-11-02: the whole story was cleared on Easy before the Hard goal was noticed."""
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertIn("only clears on Hard or harder count", session.goal_summary())
+        session.cleared_missions |= set(session.mission_ids)
+        lines = session.goal_progress()
+        self.assertTrue(lines[0].startswith(f"Goal: 0/{len(session.story_names)} story missions cleared on Hard"))
+        self.assertIn("Only clears on Hard or harder count for the goal.", lines)
+        self.assertEqual(session.goal_banner_text(), f"Goal: Story 0/{len(session.story_names)}  (Hard+)")
+        self.assertTrue(session.goal_banner)  # on by default
+        session.difficulty_cleared = set(session.story_names)
+        self.assertEqual(session.goal_progress()[-1], "Goal complete.")
+        self.assertEqual(session.goal_banner_text(), "Goal complete")
+
 
 class ShortGoalTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"goal_story_missions": 5}
+    options = {"goal_story_missions": 5, "final_mission_goal": False, "include_dlc": False}
 
     def test_goal_after_five_story_clears(self) -> None:
         from ..regions import STORY_EVENT, VICTORY_EVENT, cleared_event
@@ -651,7 +691,8 @@ class ShortGoalTests(WorldTestBase):
 
 class ChallengeGoalTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"side_content": ["Challenges"], "goal_story_missions": 3, "goal_challenges": 2, "sheikah_runes": "start_with_all"}
+    options = {"side_content": ["Challenges"], "goal_story_missions": 3, "goal_challenges": 2, "sheikah_runes": "start_with_all",
+               "final_mission_goal": False}
 
     def test_story_and_challenge_counts(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
@@ -712,6 +753,7 @@ class CatchUpLevelTests(unittest.TestCase):
                 levels[hero] = level
                 return True
             def raise_levels(self, heroes, level): return []
+            def _battle_character(self): return None
 
         notes = []
         ctx = SimpleNamespace(
@@ -740,6 +782,32 @@ class CatchUpLevelTests(unittest.TestCase):
         levels["Link"] = 40
         self.sync(levels, ["Link", "Zelda"], ["Daruk", "Mipha"], ["Daruk", "Mipha"])
         self.assertEqual(levels["Mipha"], 20)  # caught up once: later level-ups of others don't move it
+
+
+class NoLockMidBattleTests(unittest.TestCase):
+    """Heroes you don't have are taken out of the roster on the map, never during a battle (Hyrule Field softlock)."""
+
+    def test_revoke_waits_for_the_map(self) -> None:
+        from types import SimpleNamespace
+        from ..client.ap_client import AoCContext
+        revoked = []
+
+        class Live:
+            battle = 0x1234
+            def grant_hero(self, hero): return False
+            def revoke_hero(self, hero): revoked.append(hero); return True
+            def _battle_character(self): return self.battle
+
+        ctx = SimpleNamespace(
+            session=SimpleNamespace(unlocked_characters={"Link"}, story_party_free=True, include_dlc=True,
+                                    pace={}, starting_characters=["Link"], min_level=1),
+            live=Live(), delivery=SimpleNamespace(state={}, note=lambda x: None, save_state=lambda: None))
+        AoCContext._sync_heroes(ctx)
+        self.assertEqual(revoked, [])
+        ctx.live.battle = None
+        AoCContext._sync_heroes(ctx)
+        self.assertIn("Impa", revoked)
+        self.assertNotIn("Link", revoked)
 
 
 class FreeHintTests(unittest.IsolatedAsyncioTestCase):
@@ -788,7 +856,8 @@ class RandomSideUnlockTests(WorldTestBase):
         from collections import Counter
         from ..world import RANDOM_SIDE_MIN_EACH, RANDOM_SIDE_START, RANDOM_SIDE_STEP
         w = self.world
-        self.assertEqual(set(w.challenge_open_at), set(w.active_challenges))  # (post-story mixed in by default)
+        self.assertEqual(set(w.challenge_open_at),  # (post-story mixed in; DLC story missions are story, not side)
+                         set(w.active_challenges) - set(w.challenge_quests) - set(w.dlc_story))
         at = list(w.challenge_open_at.values()) + list(w.quest_open_at.values())
         per = Counter(at)
         self.assertGreaterEqual(per[0], RANDOM_SIDE_START)
@@ -824,7 +893,10 @@ class RandomSideUnlockTests(WorldTestBase):
         name, opens = next((c, t) for c, t in session.challenge_open_at.items() if t >= 3
                            and MISSION_RECORD_IDS[c][0] in session.challenge_unlocks())
         record = MISSION_RECORD_IDS[name][0]
-        quest = next(q for q, t in session.quest_open_at.items() if t >= opens and q not in OPEN_SERVICE_QUESTS)
+        from ..data_rewards import ALL_GROUPS
+        by_item = {q for item, n in session.reward_copies.items() if n and item in ALL_GROUPS for q in ALL_GROUPS[item].known}
+        quest = next(q for q, t in session.quest_open_at.items() if t >= opens and q not in OPEN_SERVICE_QUESTS
+                     and q not in by_item)  # (a quest waiting for its reward item stays closed)
         self.assertEqual(session.challenge_unlocks()[record], (record,))  # closed: needs its own clear
         self.assertEqual(session.quest_states()[quest], -1)
         from ..data_save import QUEST_STATE_IDS
@@ -839,6 +911,233 @@ class RandomSideUnlockTests(WorldTestBase):
         self.assertEqual(session.quest_states()[quest], 2)
         self.assertEqual(session.quest_rows()[quest], ((), ()))  # the game's row needs nothing now
         self.assertTrue(CHALLENGE_BY_NAME[name])
+
+
+class DifficultyCheckTests(WorldTestBase):
+    """difficulty_checks hard: each story mission and checked challenge gets a Normal and a Hard check."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"difficulty_checks": "hard", "side_content": ["Challenges"], "side_check_density": 30}
+
+    def test_locations_and_slot_data(self) -> None:
+        from ..locations import challenge_location, difficulty_location, mission_location
+        w = self.world
+        names = {loc.name for loc in self.multiworld.get_locations(self.player)}
+        for m in w.mission_order:
+            self.assertIn(difficulty_location(mission_location(m), 2), names)
+            self.assertNotIn(difficulty_location(mission_location(m), 3), names)
+        c = sorted(w.checked_challenges)[0]
+        self.assertIn(f"Challenge: {c} (Normal)", names)
+        session = Session(json.loads(json.dumps(w.fill_slot_data())))
+        self.assertEqual(session.difficulty_levels, 2)
+        self.assertEqual(session.difficulty_lock, 0)
+        m = w.mission_order[3]
+        self.assertIsNotNone(session.on_difficulty_cleared(f"{m} (Hard)"))
+        self.assertIsNone(session.on_difficulty_cleared(f"{m} (Hard)"))  # once
+        self.assertIsNone(session.on_difficulty_cleared(f"{m} (Very Hard)"))  # not in this seed
+        from ..client.savewatch import message_for
+        self.assertEqual(message_for(f"{m} (Normal)")["type"], "difficulty_cleared")
+        # a harder clear needs what the clear needs
+        base = w.get_location(challenge_location(c))
+        self.assertIs(w.get_location(difficulty_location(challenge_location(c), 1)).access_rule, base.access_rule)
+
+    def test_counted_clears(self) -> None:
+        from ..client.ap_client import AoCContext
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        m = self.world.mission_order[3]
+
+        class Live:
+            def cleared_missions(self):
+                return {m, "The Battle of Hyrule Field"}
+
+            def cleared_missions_at(self, slot):
+                return {m} if slot <= 2 else set()
+
+        ctx = AoCContext.__new__(AoCContext)
+        ctx.session, ctx.live, ctx._too_easy = session, Live(), None
+        got = ctx._counted_clears()
+        self.assertEqual(got, {m, "The Battle of Hyrule Field", f"{m} (Normal)", f"{m} (Hard)"})
+
+
+class DifficultyLockTests(WorldTestBase):
+    """difficulty_lock hard: no per-difficulty checks; only Hard+ clears count (Hyrule Field exempt)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"difficulty_lock": "hard", "difficulty_checks": "very_hard"}
+
+    def test_lock(self) -> None:
+        from ..client.ap_client import AoCContext
+        self.assertEqual(self.world.difficulty_levels, 0)
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertEqual((session.difficulty_lock, session.difficulty_levels), (2, 0))
+        easy, hard = self.world.mission_order[2], self.world.mission_order[3]
+
+        class Live:
+            def cleared_missions(self):
+                return {easy, hard, "The Battle of Hyrule Field"}
+
+            def cleared_missions_at(self, slot):
+                return {hard} if slot <= 2 else set()
+
+        class Overlay:
+            shown = []
+
+            def show(self, text):
+                self.shown.append(text)
+
+        ctx = AoCContext.__new__(AoCContext)
+        ctx.session, ctx.live, ctx._too_easy, ctx.overlay = session, Live(), None, Overlay()
+        self.assertEqual(ctx._counted_clears(), {hard, "The Battle of Hyrule Field"})
+        self.assertEqual(ctx.overlay.shown, [])  # what was already there is not announced
+        ctx._too_easy = set()
+        ctx._counted_clears()
+        self.assertEqual(len(ctx.overlay.shown), 1)
+
+
+class DlcFailsafeTests(WorldTestBase):
+    """include_dlc on a game without the Expansion Pass: EX challenges leave the goal, DLC checks are listed to send."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"include_dlc": True, "side_content": ["Challenges", "Quests", "Weapons"], "goal_challenges": 168,
+               "final_mission_goal": False}
+
+    def test_dlc_ids_and_drop(self) -> None:
+        from ..data_challenges import CHALLENGE_BY_NAME, DLC_STORY_MISSIONS
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        names = {self.multiworld.get_location(n, self.player).address: n for n in
+                 (loc.name for loc in self.multiworld.get_locations(self.player) if loc.address)}
+        dlc = [names[i] for i in session.dlc_location_ids]
+        self.assertTrue(dlc)
+        self.assertTrue(all(" EX " in f" {n.partition(': ')[2]}" or n.startswith("Obtain: ") for n in dlc), dlc[:5])
+        self.assertTrue(any(n.startswith("Challenge: EX ") for n in dlc) and any(n.startswith("Quest: EX ") for n in dlc))
+        self.assertNotIn("Challenge: Road to the Ancient Lab", dlc)
+        before = session.goal_challenges
+        ids = session.drop_dlc()
+        self.assertEqual(ids, session.dlc_location_ids)
+        self.assertFalse(session.include_dlc)
+        self.assertFalse(any(CHALLENGE_BY_NAME[c].is_ex for c in session.goal_challenge_pool))
+        self.assertEqual(session.goal_challenges, min(before, len(session.goal_challenge_pool)))
+        # Guardian of Remembrance leaves the story goal (base story only), and EX quests are no longer touched
+        self.assertEqual(session.story_names, list(session.mission_ids))
+        self.assertTrue(any(f"Challenge: {m}" in dlc for m in DLC_STORY_MISSIONS))
+        self.assertFalse(any(q.startswith("EX ") for q in session.quest_states()))
+        session.cleared_missions |= set(session.mission_ids)
+        session.challenges_done |= set(session.goal_challenge_pool)
+        self.assertTrue(session.goal_complete)  # winnable without any DLC clear
+
+    def test_missing_waves_reads_ryujinx_list(self) -> None:
+        import os
+        import tempfile
+        from ..client.dlc import AOC_TITLE_ID, missing_waves
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(missing_waves([d]))
+            os.makedirs(os.path.join(d, "games", AOC_TITLE_ID))
+            with open(os.path.join(d, "games", AOC_TITLE_ID, "dlc.json"), "w") as f:
+                json.dump([{"path": "x.nsp", "dlc_nca_list": [{"title_id": 0x01002B00111A3003, "is_enabled": True}]},
+                           {"path": "y.nsp", "dlc_nca_list": [{"title_id": 0x01002B00111A3004, "is_enabled": False}]}], f)
+            self.assertEqual(missing_waves([d]), ["Guardian of Remembrance"])
+
+    def test_eden_game_list_cache(self) -> None:
+        import os
+        import tempfile
+        from ..client.dlc import missing_waves
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(missing_waves([], [d]))
+            os.makedirs(os.path.join(d, "cache", "game_list"))
+            os.makedirs(os.path.join(d, "config"))
+            cache = os.path.join(d, "cache", "game_list", "01002B00111A2000.pv.txt")
+            with open(cache, "w") as f:
+                f.write("Update (1.4.1)\nDLC (1, 1, 2, 2, 3, 3, 4, 4)\n")
+            self.assertEqual(missing_waves([], [d]), [])
+            with open(cache, "w") as f:
+                f.write("Update (1.4.1)\nDLC (1, 2, 3)\n")
+            self.assertEqual(missing_waves([], [d]), ["Guardian of Remembrance"])
+            with open(os.path.join(d, "config", "qt-config.ini"), "w") as f:  # DLC turned off for the game
+                f.write("[DisabledAddOns]\n" + r"1\title_id=72104873324847104" + "\n" + r"1\disabled\1\d=DLC" + "\n"
+                        + r"1\disabled\size=1" + "\n")
+            self.assertEqual(missing_waves([], [d]), ["Pulse of the Ancients", "Guardian of Remembrance"])
+
+
+class CollectedRewardQuestTests(WorldTestBase):
+    """A quest opened by a reward item whose check is already collected: done for free when the client can give its
+    reward (data_save.QUEST_EFFECTS), else left open so the player can still earn it (user, 2026-11-02)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"side_content": ["Quests"], "side_unlocks": "game_rules", "locked_features": ["Cooking"],
+               "quest_reward_items": {"Progressive Research Quest": 14}}
+
+    def test_known_reward_free_unknown_open(self) -> None:
+        from ..data_rewards import ALL_GROUPS
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.apply_received_item_names(["Feature: Cooking"] + ["Progressive Research Quest"] * 14)
+        known, unknown = "Hot Meals in a Pot", "Let's Dance"
+        self.assertIn(unknown, ALL_GROUPS["Progressive Research Quest"].known)
+        for q in (known, unknown):
+            if q in session.ids["quest"]:
+                session.apply_checked_location_ids({session.ids["quest"][q]})
+            else:
+                session.collected_quests.add(q)
+        states = session.quest_states()
+        self.assertEqual(states[known], 3)
+        self.assertEqual(states[unknown], 2)
+
+
+class RecipeStoreTests(WorldTestBase):
+    """Progressive Recipe gives the recipes themselves (0.9.73): copy k sets the first k recipes' bytes."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"side_content": ["Quests"], "side_unlocks": "game_rules", "quest_reward_items": {"Progressive Recipe": 25}}
+
+    def test_recipe_bytes_follow_items(self) -> None:
+        from ..data_rewards import PROFILE
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.apply_received_item_names(["Progressive Recipe"] * 2)
+        writes = session.reward_writes()
+        self.assertEqual(writes[(PROFILE, 0x2BC)], 1)  # A Feast of Greens
+        self.assertEqual(writes[(PROFILE, 0x2CE)], 1)  # A Birthday Treat
+        self.assertEqual(writes[(PROFILE, 0x2E5)], 0)  # Superb Fish Dish: not yet
+        self.assertIn("A Feast of Greens", session.store_quests())
+        self.assertNotEqual(session.quest_states().get("Superb Fish Dish"), -1)  # no longer held for the item
+
+
+class SplitUnlockOrderTests(WorldTestBase):
+    """Challenges randomized, quests vanilla: only challenges get random openings; quests keep the game's gates."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"side_content": ["Challenges", "Quests"], "quest_unlock_order": "vanilla", "quest_reward_items": {}}
+
+    def test_only_challenges_random(self) -> None:
+        w = self.world
+        self.assertTrue(w.challenge_open_at)
+        self.assertEqual(w.quest_open_at, {})
+        session = Session(json.loads(json.dumps(w.fill_slot_data())))
+        self.assertTrue(session.side_random)
+        from ..data_rewards import ALL_GROUPS
+        by_item = {q for item, n in session.reward_copies.items() if n and item in ALL_GROUPS for q in ALL_GROUPS[item].known}
+        held = {q for q, state in session.quest_states().items() if state == -1}
+        self.assertLessEqual(held, by_item)  # only quests waiting for their item: none held back by a random order
+        self.assertEqual(session.quest_rows(), {})
+
+
+class SplitUnlockOrderQuestsTests(WorldTestBase):
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"side_content": ["Challenges", "Quests"], "challenge_unlock_order": "vanilla", "quest_reward_items": {}}
+
+    def test_only_quests_random(self) -> None:
+        self.assertEqual(self.world.challenge_open_at, {})
+        self.assertTrue(self.world.quest_open_at)
+
+
+class CollectedQuestTests(WorldTestBase):
+    """A quest whose check the server already has (someone's release/collect) is marked done in game, with what it
+    opens; reward-group quests keep following their items, Hope quests their map %."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"side_content": ["Challenges", "Quests"], "quest_reward_items": {}}
+
+    def test_collected_quest_is_done_and_counts(self) -> None:
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        quest = next(q for q, t in sorted(session.quest_open_at.items(), key=lambda x: -x[1])
+                     if t > 0 and q in session.ids["quest"])
+        self.assertEqual(session.quest_states()[quest], -1)
+        before = session.completions
+        self.assertTrue(session.apply_checked_location_ids({session.ids["quest"][quest]}))
+        self.assertEqual(session.quest_states()[quest], 3)
+        self.assertEqual(session.completions, before + 1)
+        self.assertFalse(session.apply_checked_location_ids({session.ids["quest"][quest]}))  # nothing new
 
 
 class RuneHintTests(WorldTestBase):
@@ -987,3 +1286,95 @@ class MapSelectionTests(WorldTestBase):
         quest = next(q for q in session.ids["quest"] if q in QUEST_STATE_IDS)
         self.assertEqual(session.selection_checks(QUEST_STATE_IDS[quest], 4), (quest, [session.ids["quest"][quest]]))
         self.assertIsNone(session.selection_checks(1, 9))
+
+
+class SeveralEmulatorsTests(unittest.TestCase):
+    """Ryujinx and Eden open together: the client leaves the game and the saves alone (said once)."""
+
+    def test_refuses_and_warns_once(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+        from ..client import ryujinx
+        from ..client.ap_client import AoCContext
+        shown = []
+        ctx = SimpleNamespace(_several_noted=False, overlay=SimpleNamespace(show=shown.append))
+        with mock.patch.object(ryujinx, "emulator_processes", return_value=[(1, "Ryujinx"), (2, "Eden")]):
+            self.assertTrue(AoCContext._several_emulators(ctx))
+            self.assertTrue(AoCContext._several_emulators(ctx))
+            with mock.patch("sys.platform", "win32"):
+                ctx._several_emulators = lambda: AoCContext._several_emulators(ctx)
+                self.assertTrue(AoCContext._game_running(ctx))  # so no save is written
+        self.assertEqual(len(shown), 1)
+        with mock.patch.object(ryujinx, "emulator_processes", return_value=[(2, "Eden")]):
+            self.assertFalse(AoCContext._several_emulators(ctx))
+
+
+class SensorRewardTests(WorldTestBase):
+    """Sheikah Sensor levels are shared by two items: the higher value wins, and a quest done in the game keeps its
+    levels (until 0.9.73 Feed the Research's item undid Sweeten the Research's)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"side_content": ["Quests"], "start_with_sheikah_sensor": False,
+               "quest_reward_items": {"Progressive Sheikah Sensor": 3, "Progressive Sheikah Sensor Research": 1}}
+
+    def test_levels(self) -> None:
+        from ..data_rewards import PROFILE, RESEARCH
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.apply_received_item_names(["Progressive Sheikah Sensor Research"])
+        self.assertEqual(session.reward_writes()[(RESEARCH, 0x780)], 1)
+        session.apply_received_item_names(["Progressive Sheikah Sensor"] * 2)
+        writes = session.reward_writes()
+        self.assertEqual((writes[(PROFILE, 0xC7B)], writes[(RESEARCH, 0x780)], writes[(RESEARCH, 0x783)]), (1, 3, 2))
+
+    def test_vanilla_quest_keeps_its_levels(self) -> None:
+        from ..data_rewards import RESEARCH
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.reward_copies["Progressive Sheikah Sensor"] = 0  # that group left vanilla in this seed
+        session.apply_received_item_names(["Progressive Sheikah Sensor Research"])
+        session.game_done.add("Sweeten the Research")
+        self.assertEqual(session.reward_writes()[(RESEARCH, 0x780)], 3)
+
+
+class SightingAlertTests(WorldTestBase):
+    """EX Alerts need a sighting the client can't set (a forced one crashed, 2026-11-02): never checks, except the
+    Battle-Tested Guardian fight (EX Alert: Forgotten Temple), which loads like a normal mission."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"include_dlc": True}
+
+    def test_alerts_stay_vanilla(self) -> None:
+        alerts = {c for c in self.world.active_challenges if c.startswith("EX Alert:")}
+        self.assertEqual(alerts, {"EX Alert: Forgotten Temple"})
+        self.assertTrue(any(c.startswith("EX ") for c in self.world.active_challenges))
+
+
+class HeroWaitTests(WorldTestBase):
+    """story_party vanilla: an unlocked DLC story mission whose forced heroes aren't yours stays closed, and the
+    client says why. story_party free (default): it opens with its item, your heroes go into the forced slots."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"mission_unlocks": "items", "story_party": "vanilla"}
+
+    def test_unlock_item_without_its_heroes_is_reported(self) -> None:
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        name = "EX Liberate the Ancient Lab"
+        session.unlocked_characters -= {"Riju", "Urbosa"}
+        session.apply_received_item_names([f"Unlock: {name}"])
+        self.assertEqual(sorted(session.waiting_for_heroes().get(name, [])), ["Riju", "Urbosa"])
+        session.apply_received_item_names(["Character: Riju", "Character: Urbosa"])
+        self.assertNotIn(name, session.waiting_for_heroes())
+
+
+class FreePartyChallengeTests(WorldTestBase):
+    """story_party free (default): missions and challenges open whenever the randomizer says; the client puts your
+    heroes in place of forced heroes you don't have (user, 2026-11-02)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"mission_unlocks": "items"}
+
+    def test_open_without_forced_heroes(self) -> None:
+        from ..data_save import MISSION_RECORD_IDS
+        from ..rules import challenge_requirements
+        name = "EX Liberate the Ancient Lab"
+        self.assertEqual(challenge_requirements(self.world, name), [f"Unlock: {name}"])
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.unlocked_characters -= {"Riju", "Urbosa"}
+        session.apply_received_item_names([f"Unlock: {name}"])
+        self.assertEqual(session.challenge_unlocks()[MISSION_RECORD_IDS[name][0]], ())
+        self.assertEqual(session.waiting_for_heroes(), {})

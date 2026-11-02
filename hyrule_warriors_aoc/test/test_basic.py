@@ -27,6 +27,8 @@ class AoCTestBase(WorldTestBase):
 
 
 class TestDefaults(AoCTestBase):
+    options = {"include_dlc": False}  # the base game's story (DLC defaults: TestDlcDefaults)
+
     def test_four_random_starters_precollected(self) -> None:
         names = {i.name for i in self.multiworld.precollected_items[self.player]}
         self.assertEqual(len(names), 4)
@@ -59,7 +61,8 @@ class TestDefaults(AoCTestBase):
 
 
 class TestRestrictedChallenge(AoCTestBase):
-    options = {"starting_character_pool": ["Link"], "starting_character_count": 1, "story_pacing": 0}
+    options = {"starting_character_pool": ["Link"], "starting_character_count": 1, "story_pacing": 0,
+               "story_party": "vanilla"}  # (free parties: the client puts your heroes in, no hero needed)
 
     def test_restricted_challenge_needs_its_character(self) -> None:
         self.sweep()
@@ -134,6 +137,7 @@ class TestVanillaFirstMission(AoCTestBase):
 
 class TestSideGates(AoCTestBase):
     options = {
+        "include_dlc": False,
         "side_content": ["Challenges", "Quests"],
         "challenge_logic": "by_level",
         "side_missions_per_unlock": 3,
@@ -193,7 +197,7 @@ class TestChampionStartersFreeParty(AoCTestBase):
 
 
 class TestGoals(AoCTestBase):
-    options = {"goal": "story_and_side_missions", "goal_side_missions": 5, "side_content": ["Quests"]}
+    options = {"goal": "story_and_side_missions", "goal_side_missions": 5, "side_content": ["Quests"], "include_dlc": False}
 
     def test_goal_needs_side_missions(self) -> None:
         self.assertEqual(self.world.goal_side_required, 5)
@@ -212,7 +216,7 @@ class TestAllCharactersGoal(AoCTestBase):
 
 
 class TestFeaturesAndLocalFiller(AoCTestBase):
-    options = {"locked_features": ["Shops", "Cooking"], "local_filler": True}
+    options = {"locked_features": ["Shops", "Cooking"], "local_filler": True, "open_shops": False}
 
     def test_feature_items_in_pool(self) -> None:
         names = {i.name for i in self.multiworld.itempool if i.player == self.player}
@@ -234,17 +238,6 @@ class TestPace(AoCTestBase):
         pace = self.world.pace()
         self.assertEqual(pace, {"min_level": 10, "catch_up": True})
         self.assertEqual(self.world.fill_slot_data()["pace"], pace)
-
-
-class TestBossRush(AoCTestBase):
-    options = {"goal": "story_and_boss_rush", "side_content": []}
-
-    def test_boss_events_exist_without_side_content(self) -> None:
-        self.assertEqual(len(self.world.active_challenges), 18)
-        self.assertEqual(len(self.location_names()), len(MISSIONS))
-        # Boss challenges need the heroes their party uses, so the goal needs items, not just the starting heroes.
-        self.collect_all_but([])
-        self.assertBeatable(True)
 
 
 class TestFeaturedChallenge(AoCTestBase):
@@ -307,7 +300,8 @@ class TestUpgradesComplete(AoCTestBase):
 
 
 class TestUpgradesScaledWhenShort(AoCTestBase):
-    options = {"combo_upgrades": 5, "side_content": [], "locked_features": ["Shops"], "starting_character_count": 4}
+    options = {"combo_upgrades": 5, "side_content": [], "locked_features": ["Shops"], "starting_character_count": 4,
+               "open_shops": False}
 
     def test_tight_pool_keeps_features_and_even_upgrades(self) -> None:
         from collections import Counter
@@ -347,7 +341,7 @@ class TestPostGoalExcluded(AoCTestBase):
 
 
 class TestGoalExtrasExcludeNothing(AoCTestBase):
-    options = {"side_content": ["Weapons", "Challenges"], "goal_challenges": 1}
+    options = {"side_content": ["Weapons", "Challenges"], "goal_challenges": 1, "final_mission_goal": False}
 
     def test_nothing_excluded(self) -> None:
         from worlds.AutoWorld import call_all
@@ -404,7 +398,7 @@ class TestNoBonusWhenChecksSuffice(AoCTestBase):
 
 
 class TestShortGoalExcludesLaterSlots(AoCTestBase):
-    options = {"side_content": ["Challenges"], "goal_story_missions": 10}
+    options = {"side_content": ["Challenges"], "goal_story_missions": 10, "final_mission_goal": False}
 
     def test_slots_after_the_goal_hold_filler(self) -> None:
         from BaseClasses import LocationProgressType
@@ -417,7 +411,7 @@ class TestShortGoalExcludesLaterSlots(AoCTestBase):
 
 
 class TestChallengeGoalKeepsPostStoryOpen(AoCTestBase):
-    options = {"side_content": ["Challenges"], "goal_challenges": 5, "post_story_unlock": 20}
+    options = {"side_content": ["Challenges"], "goal_challenges": 5, "post_story_unlock": 20, "final_mission_goal": False}
 
     def test_story_can_finish_first(self) -> None:
         from BaseClasses import LocationProgressType
@@ -430,16 +424,14 @@ class TestChallengeGoalKeepsPostStoryOpen(AoCTestBase):
 
 
 class TestCalamityRescues(AoCTestBase):
-    """Calamity Strikes opens once all four Champions are yours (no unlock item, not shuffled) and opens Water and
-    Fire / Air and Lightning itself, so no Champion is ever trapped (unplayable) after it."""
+    """Since 0.9.72 Calamity Strikes and the rescues are shuffled with unlock items like any mission; Calamity
+    Strikes still needs all four Champions (a Champion you don't have would be trapped after it)."""
     options = {"mission_unlocks": "items", "side_content": ["Challenges"], "side_unlocks": "game_rules"}
 
     def test_calamity_strikes_needs_the_champions(self) -> None:
-        for name in ("Calamity Strikes", "Water and Fire", "Air and Lightning"):
-            self.assertEqual(self.world.slot_to_mission[name], name)
         names = {i.name for i in self.multiworld.itempool} | {i.name for i in self.multiworld.precollected_items[self.player]}
         for name in ("Calamity Strikes", "Water and Fire", "Air and Lightning"):
-            self.assertNotIn(f"Unlock: {name}", names)
+            self.assertIn(f"Unlock: {name}", names)
         missing = [f"Character: {c}" for c in ("Mipha", "Daruk", "Revali", "Urbosa") if c not in self.world.starting_characters]
         if missing:
             self.collect_all_but(missing)
@@ -447,18 +439,18 @@ class TestCalamityRescues(AoCTestBase):
         self.collect_all_but([])
         self.assertTrue(self.can_reach_location("Clear: Calamity Strikes"))
 
-    def test_client_opens_calamity_strikes_with_the_champions(self) -> None:
+    def test_client_opens_calamity_strikes_with_its_unlock_and_the_champions(self) -> None:
         import json
         from ..client.session import Session
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         others = [c for c in session.all_characters if c not in ("Mipha", "Daruk", "Revali", "Urbosa")]
         session.unlocked_characters = set(others)
+        session.mission_unlocks.add("Calamity Strikes")
         self.assertNotIn("Calamity Strikes", session.available_missions())
         session.unlocked_characters |= {"Mipha", "Daruk", "Revali", "Urbosa"}
         self.assertIn("Calamity Strikes", session.available_missions())
-        self.assertNotIn("Water and Fire", session.available_missions())
         session.cleared_missions.add("Calamity Strikes")
-        self.assertIn("Water and Fire", session.available_missions())
+        self.assertNotIn("Water and Fire", session.available_missions())  # needs its own unlock now
 
     def test_trapped_champion_challenges_close_after_calamity_strikes(self) -> None:
         import json
@@ -482,3 +474,80 @@ class TestVanillaPostStory(AoCTestBase):
         self.assertTrue(self.world.post_goal_side)
         self.assertFalse(any(_post_story_challenge(c) for c in self.world.checked_challenges))
         self.assertFalse(any(_post_story_challenge(c) for c in self.world.challenge_open_at))
+
+
+class TestStartOpenDefaults(AoCTestBase):
+    """Sensor, stables, shops and the dye shop open from the start by default: their quests hold no checks."""
+
+    def test_open_quests_hold_no_checks(self) -> None:
+        open_quests = self.world.open_quests
+        for quest in ("Needed: Researchers!", "Dyeing to Make Contact", "Wedding Worry", "Hot Meals in a Pot"):
+            self.assertIn(quest, open_quests)
+            self.assertNotIn(f"Quest: {quest}", self.location_names())
+        self.assertNotIn("Quest: The Hope of All Hyrule", self.location_names())
+        self.assertNotIn("Quest: The Hope of Hebra", self.location_names())
+        data = self.world.fill_slot_data()
+        self.assertIn("Needed: Researchers!", data["open_quests"])
+
+
+class TestStartOpenOff(AoCTestBase):
+    options = {"start_with_sheikah_sensor": False, "open_stables": False, "open_shops": False, "open_dye_shop": False,
+               "region_hope_checks": True, "start_with_trackers": True, "hint_heroes": True, "hero_level_cap": True}
+
+    def test_options_off(self) -> None:
+        open_quests = self.world.open_quests
+        self.assertNotIn("Needed: Researchers!", open_quests)
+        self.assertNotIn("Dyeing to Make Contact", open_quests)
+        self.assertIn("A Most Peculiar Korok", open_quests)
+        self.assertTrue(self.world.pre_granted)
+        self.assertNotIn("Quest: The Hope of All Hyrule", self.location_names())
+        heroes = {f"Character: {c}" for c in self.world.characters if c not in self.world.starting_characters}
+        self.assertTrue(heroes <= self.world.options.start_hints.value)
+        self.assertEqual(self.world.fill_slot_data()["hero_level_cap"], 1)
+
+
+class TestFinalMissionGoal(AoCTestBase):
+    options = {"mission_unlocks": "items", "goal_story_missions": 6, "challenge_checks": False, "quest_checks": False}
+
+    def test_future_of_hyrule_is_the_goal(self) -> None:
+        names = {i.name for i in self.multiworld.itempool} | {i.name for i in self.multiworld.precollected_items[self.player]}
+        self.assertNotIn("Unlock: The Future of Hyrule", names)
+        self.assertEqual(self.world.mission_order[-1], "The Future of Hyrule")
+        import json
+        from ..client.session import Session
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session.unlocked_characters = set(session.all_characters)
+        others = [m for m in session.mission_ids if m != "The Future of Hyrule"]
+        session.cleared_missions |= set(others[:4])
+        self.assertFalse(session.mission_available("The Future of Hyrule"))
+        session.cleared_missions.add(others[4])
+        self.assertTrue(session.mission_available("The Future of Hyrule"))
+        self.assertFalse(session.goal_complete)
+        session.cleared_missions.add("The Future of Hyrule")
+        self.assertTrue(session.goal_complete)
+
+
+class TestDlcDefaults(AoCTestBase):
+    """include_dlc is on by default (user, 2026-11-02): Guardian of Remembrance's 8 missions are story missions."""
+
+    def test_dlc_story_counts_for_the_goal(self) -> None:
+        from ..data_challenges import DLC_STORY_MISSIONS
+        self.assertEqual(self.world.dlc_story, list(DLC_STORY_MISSIONS))
+        self.assertFalse(set(DLC_STORY_MISSIONS) & set(self.world.goal_challenge_pool))
+        self.assertFalse(set(DLC_STORY_MISSIONS) & set(self.world.challenge_open_at))  # never by side counts
+        self.assertTrue(set(DLC_STORY_MISSIONS) <= self.world.checked_challenges)
+        self.assertEqual(self.world.options.goal_story_missions.value, 28)
+        self.collect_by_name([f"Character: {c}" for c in self.world.characters if c not in self.world.starting_characters])
+        self.assertBeatable(True)
+
+
+class TestDlcStoryItems(AoCTestBase):
+    options = {"mission_unlocks": "items"}
+
+    def test_each_dlc_story_mission_has_an_unlock_item(self) -> None:
+        from ..data_challenges import DLC_STORY_MISSIONS
+        names = {i.name for i in self.multiworld.get_items() if i.player == self.player}
+        self.assertTrue({f"Unlock: {m}" for m in DLC_STORY_MISSIONS} <= names)
+        state = self.multiworld.get_all_state(False)
+        state.prog_items[self.player]["Unlock: EX To Zelda's Side"] = 0
+        self.assertFalse(self.world.get_location("Event: Challenge EX To Zelda's Side").can_reach(state))

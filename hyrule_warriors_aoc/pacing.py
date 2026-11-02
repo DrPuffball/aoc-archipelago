@@ -72,7 +72,7 @@ def candidate_locations(world: AgeOfCalamityWorld) -> dict[str, int]:
         party = world.mission_party.get(mission, ())
         if not party:
             stages[mission_location(mission)] = _slot(world, mission)
-    for name in () if world.side_random else world.checked_quests:  # random side unlocks: no story stage
+    for name in () if world.quest_random else world.checked_quests:  # random quest unlocks: no story stage
         if not quest_needs_characters(name):
             stages[quest_location(name)] = quest_stage(world, name)
     for source, kind, index in world.checked_koroks:

@@ -78,7 +78,7 @@ class PatchTests(unittest.TestCase):
         b.material_bundle(seed=4)
         self.assertEqual(a.data, b.data)
         given = [i for i in L.BUNDLE_MATERIALS if material(a.data, i)]
-        self.assertEqual(len(given), 3)
+        self.assertEqual(len(given), 5)  # Material Bundle: 5 materials
         self.assertTrue(all(a.data[L.MATERIAL_SEEN + i] == 1 for i in given))
 
     def test_level_up_lowest_unlocked(self) -> None:
@@ -168,13 +168,16 @@ class WatchAndDeliverTests(unittest.TestCase):
         class FakeLive:
             def __init__(self): self.calls = []
             def add_rupees(self, n): self.calls.append(("rupees", n)); return "r"
-            def material_bundle(self, seed): self.calls.append(("bundle", seed)); return "m"
+            def material_bundle(self, seed, kinds, amount): self.calls.append(("bundle", seed, kinds, amount)); return "m"
             def level_up(self, heroes): self.calls.append(("level", tuple(heroes))); return "l"
         d = delivery.Delivery("seed", "me")
         live = FakeLive()
         d.apply(["Rupee Pouch", "Material Bundle"], {"Link"}, live)
         d.apply(["Rupee Pouch", "Material Bundle", "Character XP Gift"], {"Link"}, live)
-        self.assertEqual(live.calls, [("rupees", delivery.RUPEE_POUCH), ("bundle", 1), ("level", ("Link",))])
+        self.assertEqual(live.calls, [("rupees", delivery.RUPEE_POUCH), ("bundle", 1, 5, 15), ("level", ("Link",))])
+        d.apply(["Rupee Pouch", "Material Bundle", "Character XP Gift", "Small Material Bundle", "Large Material Bundle"],
+                {"Link"}, live)
+        self.assertEqual(live.calls[-2:], [("bundle", 3, 3, 10), ("bundle", 4, 8, 25)])  # bundle sizes
         target = delivery.SaveFileTarget(self.path, self.copies)
         self.assertEqual(d.apply(["Rupee Pouch", "Material Bundle", "Character XP Gift"], {"Link"}, target), [])
 
@@ -196,6 +199,25 @@ class WatchAndDeliverTests(unittest.TestCase):
         self.assertEqual(sum(d.state["weapons_given"].values()), 2)  # owned copies match: no weapon check is sent
         self.assertEqual(delivery.extra_weapon({"Mipha"}, 7), delivery.extra_weapon({"Mipha"}, 7))  # fixed per item
         self.assertIsNone(delivery.extra_weapon(set(), 0))
+
+    def test_weapon_bundles_give_several_weapons_to_different_heroes(self) -> None:
+        from ..data import WEAPON_BY_NAME
+
+        class FakeLive:
+            def __init__(self): self.given = []
+            def give_weapon(self, name, wielder): self.given.append((name, wielder)); return name
+        heroes = {"Link", "Mipha", "Daruk", "Revali", "Urbosa", "Zelda"}
+        d = delivery.Delivery("seed", "me")
+        live = FakeLive()
+        d.apply(["Weapon Bundle", "Large Weapon Bundle", "Weapon XP Gift"], heroes, live)
+        self.assertEqual(len(live.given), 3 + 5 + 1)  # Weapon XP Gift (older seeds) gives a weapon now
+        self.assertEqual(len({w for _, w in live.given[:3]}), 3)  # a bundle's weapons go to different heroes
+        self.assertEqual(len({w for _, w in live.given[3:8]}), 5)
+        self.assertTrue(all(w in heroes and not WEAPON_BY_NAME[n].dlc for n, w in live.given))
+        self.assertEqual(sum(d.state["weapons_given"].values()), 9)
+        self.assertEqual(delivery.extra_weapons(heroes, 4, 3), delivery.extra_weapons(heroes, 4, 3))  # fixed per item
+        self.assertEqual(delivery.extra_weapons(heroes, 4, 1), [delivery.extra_weapon(heroes, 4)])
+        self.assertEqual(len(delivery.extra_weapons({"Mipha"}, 2, 3)), 3)  # one hero: all three are hers
 
 
 class HeroTargetTests(unittest.TestCase):
@@ -239,7 +261,8 @@ class StoryPartyDataTests(unittest.TestCase):
 
         def party(record: int) -> bytes:
             return fake.read(rows + 16 + record * L.PARTY_ROW_SIZE + L.PARTY_OFFSET, 4)
-        self.assertEqual(party(1), bytes([1, 4, 0, 0]))  # Hyrule Field: Link kept (his own slot), Impa -> Mipha
+        # Hyrule Field: Link kept (his own slot); Impa's forced slot takes the weakest hero (free slots are yours)
+        self.assertEqual(party(1), bytes([1, 5, 0, 0]))
         self.assertEqual(party(18), bytes([0, 0, 9, 1]))  # Water and Fire: Sidon kept; Yunobo -> Link (not Mipha/Daruk, its allies)
 
 
@@ -382,26 +405,22 @@ class HeroLevelTests(unittest.TestCase):
 
 
 class GiftTests(unittest.TestCase):
-    def test_weapon_xp_gift_raises_lowest_equipped_weapon_up_to_the_cap(self) -> None:
-        from ..client import live_hook as H
+    def test_quest_effects_set_once(self) -> None:
         from ..client.live_hook import LiveGame
         fake = FakeGuest()
-        flags = fake.base + 0x90000
+        flags, profile = fake.base + 0x90000, fake.base + 0x98000
         fake.put(fake.base + 0x1000 + 0x5A0, struct.pack("<Q", flags))
+        fake.put(fake.base + 0x1000 + 0x588, struct.pack("<Q", profile))
+        fake.put(flags + 0x72E, bytes([1]))
         game = LiveGame(fake)
-        for hero, level in (("Mipha", 7), ("Sidon", 3)):
-            row = fake.heroes + H.HEROES[1] + L.HERO_SLOTS[hero] * H.HEROES[2]
-            fake.put(row + H.HERO_FLAGS, bytes([1, 1, 1]))
-            for pool in fake.pools:
-                rec = pool + L.HERO_SLOTS[hero] * H.WEAPONS_PER_HERO * H.WEAPON_RECORD
-                fake.put(rec + H.WEAPON_KIND, struct.pack("<H", 251))
-                fake.put(rec + H.WEAPON_LEVEL, bytes([level]))
-        self.assertEqual(game.weapon_level_up(["Mipha", "Sidon"]), "Sidon's Fishing Harpoon -> level 4")
-        sidon = L.HERO_SLOTS["Sidon"] * H.WEAPONS_PER_HERO * H.WEAPON_RECORD + H.WEAPON_LEVEL
-        self.assertEqual([fake.read(p + sidon, 1)[0] for p in fake.pools], [4, 4])
-        for pool in fake.pools:
-            fake.put(pool + sidon, bytes([L.WEAPON_LEVEL_CAP]))
-        self.assertEqual(game.weapon_level_up(["Sidon"]), "Weapon XP Gift: every equipped weapon is at the level cap")
+        done = {"Hot Meals in a Pot", "Brawny Blacksmiths", "On the Hook", "Needed: Researchers!"}
+        self.assertEqual(game.set_quest_effects(done),
+                         ["Brawny Blacksmiths", "Hot Meals in a Pot", "Needed: Researchers!", "On the Hook"])
+        self.assertEqual(fake.read(flags + 0x320, 1), bytes([1]))  # the Smithy's open flag (2026-11-02)
+        self.assertEqual(fake.read(flags + 0x1A07, 1) + fake.read(profile + 0x2C3, 1), bytes([1, 1]))
+        self.assertEqual(fake.read(profile + 0xC7B, 1), bytes([1]))
+        self.assertEqual(fake.read(flags + 0x5BB, 1) + fake.read(flags + 0x72E, 1), bytes([1, 0]))  # stable pair
+        self.assertEqual(game.set_quest_effects(done), [])
 
     def test_hearty_meal_adds_ingredients(self) -> None:
         from ..client import live_hook as H
@@ -696,11 +715,17 @@ class RuneTests(unittest.TestCase):
         states = block + S.QUEST_STATE_LIVE
         for copy in (0, H.QUEST_SAVED_COPY):
             fake.put(states + copy, bytes([1] * S.QUEST_STATE_COUNT))
+        icons = fake.base + 0xB0000  # the world map's copy (user 2026-11-02: done quests still showed orange)
+        fake.put(fake.base + 0x1000 + H.MISSION_STATES_BLOCK, struct.pack("<Q", icons))
+        for copy in (0, H.QUEST_MAP_SAVED_COPY):
+            fake.put(icons + H.QUEST_MAP_STATES + copy, bytes([2] * S.QUEST_STATE_COUNT))
         game = LiveGame(fake)
         self.assertTrue(game.complete_quest(SMITHY_QUEST))
         i = S.QUEST_STATE_IDS[SMITHY_QUEST]
         for copy in (0, H.QUEST_SAVED_COPY):
             self.assertEqual(fake.read(states + copy + i - 1, 3), bytes([1, S.QUEST_DONE, 1]))
+        for copy in (0, H.QUEST_MAP_SAVED_COPY):
+            self.assertEqual(fake.read(icons + H.QUEST_MAP_STATES + copy + i - 1, 3), bytes([2, S.QUEST_DONE, 2]))
         self.assertFalse(game.complete_quest(SMITHY_QUEST))
 
     def test_hero_bonus_written_to_current_and_saved_profile(self) -> None:
@@ -781,7 +806,8 @@ class ProbeTests(unittest.TestCase):
         mem.put(H.BATTLE, struct.pack("<Q", holder))
         mem.put(holder, struct.pack("<7Q", 0, 0, 0, 0, 0, 0, B))
         b = bytearray(0x400); struct.pack_into("<Q", b, 0x8, char)
-        mem.put(B, b); mem.put(char, bytearray(0x800))
+        c = bytearray(0x800); struct.pack_into("<ff", c, 0x28, 900.0, 1000.0)  # HP / max HP: a live hero
+        mem.put(B, b); mem.put(char, c)
         mem.put(H.UNITS, struct.pack("<Q", flow)); mem.put(flow, struct.pack("<48I", *[0] * 44, 0x5400, 0, 0, 0))
         target = 0x10_0000_9000
         mem.put(target, b"\x02")
@@ -946,3 +972,160 @@ class ProbeWatcherTests(unittest.TestCase):
         self.assertIn([hex(0x79E), 0, 1], kinds["quest_done"]["profile"])
         self.assertIn([hex(0x62), 0, 1], kinds["runes"]["B"])
         self.assertEqual(kinds["ko"]["max_hp"], 1600.0)
+
+
+class EdenFastmemTests(unittest.TestCase):
+    """Eden: guest memory is one host block (fastmem); the module starts at a committed region, at another guest address
+    than in Ryujinx, found by a data slot that holds its own address (else by searching)."""
+
+    class Proc:
+        pid = 7
+
+        def __init__(self, arena, module_guest, self_pointer=True):
+            from ..client.ryujinx import SELF_POINTER, WRITER, WRITER_SIG
+            self.arena, self.module = arena, arena + module_guest
+            self.mem = {self.module + WRITER: WRITER_SIG, arena + 0x2000000: b"heap!..."}
+            self.mem[self.module + 0x100] = b"global"
+            self.mem[self.module + 0x200] = struct.pack("<Q", 0x2000000)  # anchor: pointer into the heap
+            if self_pointer:
+                self.mem[self.module + SELF_POINTER] = struct.pack("<Q", module_guest + SELF_POINTER)
+
+        def regions(self):
+            yield 0x10000, 0x1000, 0x1000
+            yield self.arena, self.module - self.arena, 0x2000
+            yield self.module, 0x3000000, 0x1000
+
+        def read(self, addr, n):
+            for start, data in self.mem.items():
+                if start <= addr and addr + n <= start + len(data):
+                    return data[addr - start:addr - start + n]
+            return bytes(n) if self.module <= addr < self.module + 0x3000000 else None
+
+        def write(self, addr, data):
+            self.mem[addr] = data
+            return True
+
+    def ok(self, guest) -> bool:
+        return guest.read(0x2000000, 5) == b"heap!"
+
+    def test_attach_by_self_pointer_and_by_search(self) -> None:
+        from ..client import ryujinx as R
+        from ..client.ryujinx import MODULE_BASE, FastmemGuest
+        arena = 0x28A98C00000
+        for module, self_pointer in ((0x8071A000, True), (0x8104000, False)):
+            R._EDEN_CACHE.clear()
+            R._EDEN_SEARCHED.clear()
+            guest = FastmemGuest.attach(self.Proc(arena, module, self_pointer), 0x200, self.ok)
+            self.assertIsNotNone(guest)
+            self.assertEqual((guest.arena, guest.shift), (arena, module - MODULE_BASE))
+            self.assertTrue(guest.code_ok())
+            self.assertEqual(guest.read(MODULE_BASE + 0x100, 6), b"global")  # module address, relocated
+            self.assertEqual(guest.read(0x2000000, 5), b"heap!")  # heap address, as is
+
+    def test_failed_search_runs_once(self) -> None:
+        from ..client import ryujinx as R
+        from ..client.ryujinx import FastmemGuest
+        R._EDEN_SEARCHED.clear()
+        proc = self.Proc(0x28A98C00000, 0x8104000, self_pointer=False)
+        self.assertIsNone(FastmemGuest.attach(proc, 0x200, lambda g: False))
+        self.assertEqual(len(R._EDEN_SEARCHED), 1)
+        self.assertIsNone(FastmemGuest.attach(proc, 0x200, lambda g: False))  # no second slow search
+
+    def test_no_module_no_attach(self) -> None:
+        from ..client.ryujinx import FastmemGuest
+        proc = self.Proc(0x100000000, 0x8504000)
+        proc.regions = lambda: iter([(0x10000, 0x1000, 0x1000)])
+        self.assertIsNone(FastmemGuest.attach(proc, 0x200, self.ok))
+        self.assertEqual(FastmemGuest.modules(proc), [])
+
+
+class SaveSyncTests(unittest.TestCase):
+    """One seed's save in Ryujinx and Eden: the newest is copied over the other (backed up), never a New Game."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        base = Path(self.tmp.name)
+        self.ryu = base / "Ryujinx" / "bis" / "user" / "save" / "0000000000000005" / "0" / "svdt"
+        self.ryu1 = self.ryu.parent.parent / "1" / "svdt"
+        self.eden = base / "eden" / "nand" / "user" / "save" / "0000000000000000" / "ABC" / "01002B00111A2000" / "svdt"
+        for p in (self.ryu, self.ryu1, self.eden):
+            p.parent.mkdir(parents=True)
+        self.backups = base / "backups"
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def write(self, path, data, when) -> None:
+        path.write_bytes(bytes(data))
+        os.utime(path, (when, when))
+
+    def test_newest_wins_both_ways(self) -> None:
+        from ..client.savesync import emulator_of, sync_saves
+        old, new = blank_save(), blank_save()
+        clear(new, "The Battle of Hyrule Field")
+        self.write(self.ryu, old, 1000)
+        self.write(self.ryu1, old, 1000)
+        self.write(self.eden, new, 2000)
+        self.assertEqual((emulator_of(str(self.ryu)), emulator_of(str(self.eden))), ("Ryujinx", "Eden"))
+        lines = sync_saves([str(self.ryu), str(self.eden)], self.backups)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("Eden -> Ryujinx", lines[0])
+        self.assertEqual(self.ryu.read_bytes(), bytes(new))
+        self.assertEqual(self.ryu1.read_bytes(), bytes(new))  # Ryujinx's working copy too
+        self.assertEqual(len(list(self.backups.rglob("svdt_*"))), 2)
+        self.assertEqual(sync_saves([str(self.ryu), str(self.eden)], self.backups), [])  # same now: nothing
+        newer = bytearray(new)
+        clear(newer, "Road to the Ancient Lab")
+        self.write(self.ryu, newer, 5000)
+        self.write(self.ryu1, newer, 5000)
+        self.assertIn("Ryujinx -> Eden", sync_saves([str(self.ryu), str(self.eden)], self.backups)[0])
+        self.assertEqual(self.eden.read_bytes(), bytes(newer))
+
+    def test_new_game_never_overwrites_progress_unless_forced(self) -> None:
+        from ..client.savesync import sync_saves
+        progress, fresh = blank_save(), blank_save()
+        clear(progress, "The Battle of Hyrule Field")
+        self.write(self.ryu, progress, 1000)
+        self.write(self.eden, fresh, 2000)  # a New Game in Eden, newer
+        lines = sync_saves([str(self.ryu), str(self.eden)], self.backups)
+        self.assertIn("Not synced", lines[0])
+        self.assertEqual(self.ryu.read_bytes(), bytes(progress))
+        sync_saves([str(self.ryu), str(self.eden)], self.backups, force=True)
+        self.assertEqual(self.ryu.read_bytes(), bytes(fresh))
+
+
+class ProbeStateChangeTests(unittest.TestCase):
+    """0.9.73 probe: save changes outside quest hand-ins, minus rupee/material noise in every profile copy."""
+
+    def test_diff_blocks_skips_noise(self) -> None:
+        from ..client.probe import Probe
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Probe(object(), Path(tmp))
+            old = {"profile": bytes(4 * 0xC30), "flags": bytes(0x100), "quests": bytes(10)}
+            new = {k: bytearray(v) for k, v in old.items()}
+            new["profile"][0x1E8] = 5  # rupees
+            new["profile"][0x3E4 + 3 * 0xC30] = 9  # a material in the saved copy
+            new["profile"][0x2BC] = 1  # a recipe
+            new["flags"][0x31] = 1
+            new["quests"][3] = 3  # (own finding)
+            diff = probe._diff_blocks(old, {k: bytes(v) for k, v in new.items()}, skip_noise=True)
+            self.assertEqual(diff, {"profile": [["0x2bc", 0, 1]], "flags": [["0x31", 0, 1]]})
+            self.assertEqual(len(probe._diff_blocks(old, {k: bytes(v) for k, v in new.items()})["profile"]), 3)
+
+
+class DlcWeaponFailsafeTests(unittest.TestCase):
+    def test_dlc_hero_weapons_skipped_without_dlc(self) -> None:
+        import tempfile
+        from unittest import mock
+
+        class FakeLive:
+            def __init__(self): self.given = []
+            def give_weapon(self, name, wielder): self.given.append((name, wielder)); return name
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(delivery, "STATE_DIR", __import__("pathlib").Path(d)):
+            dv = delivery.Delivery("seed", "me")
+            dv.skip_dlc = True
+            live = FakeLive()
+            done = dv.apply(["Weapon: Swords of Ferocity", "Weapon: Zora Spear"], {"Sooga", "Mipha"}, live)
+            self.assertEqual([n for n, _ in live.given], ["Zora Spear"])  # the DLC hero's weapon is left out
+            self.assertTrue(any("skipped" in d for d in done))

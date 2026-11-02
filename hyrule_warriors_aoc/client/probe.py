@@ -22,10 +22,20 @@ Gift, rupees, materials, weapons given, heroes joining, side content opened) is 
 1 min after the next mission clear: findings "effect" (ok true / false / null = can't tell). The client also records
 "check" (a location sent, with what in game sent it), "no_check" (done in game, no check in this seed), "received"
 (an item and what the client did with it), "goal" and "deathlink". Failures are announced in the client log.
+
+0.9.73 (user: improve the probe to learn how the game works):
+- more of the save is watched (story flags, dyes and other blocks earlier surveys saw rewards in; optional, sized
+  down until readable), for quest hand-ins and everything below;
+- "state_change": save bytes that change on the map with no quest handed in (menu choices such as the difficulty,
+  map reveals, unlock flags; size-capped so a save load doesn't count);
+- "mission_start" / "mission_end": what changed between the map and the start of a battle (the difficulty and party
+  chosen) and over the battle, with the map cursor's mission;
+- "game_lost": the client's last writes and the mission state when the game went away (crash forensics).
 """
 
 from __future__ import annotations
 
+import collections
 import json
 import struct
 import time
@@ -36,6 +46,9 @@ from .ryujinx import MODULE_BASE
 FIGHT_WINDOW, FIGHT_COUNT = 60.0, 5  # the client rewriting one address this often means the game undoes it
 VERIFY_AFTER = 20.0  # seconds before a one-off client write is checked for having been undone
 ONE_SHOT_WRITERS = {"kill_player", "_request_flow"}
+# Gifts the player is free to use up (fuse or sell a weapon, spend rupees or materials): a later change is play, not
+# the game undoing the client (user: a fused Extra Weapon was reported as undone).
+PLAYER_USES = {"give_weapon", "add_rupees", "material_bundle", "hearty_meal", "_expect_material"}
 EFFECT_STAGES = (("20s", 20.0), ("5min", 300.0))  # plus "after_mission": 60 s after the next mission clear
 EFFECT_GIVE_UP = 3600.0  # an effect with no mission clear within an hour is dropped after its 5 min check
 
@@ -77,6 +90,11 @@ class Probe:
         self._fought: dict[int, float] = {}  # address -> when last reported
         self._verify: list[tuple[float, int, bytes, str]] = []  # (due, address, written bytes, client function)
         self._effects: list[dict] = []  # pending effect checks (live_hook.EXPECTATIONS)
+        self._recent_writes: collections.deque = collections.deque(maxlen=30)  # for game_lost
+        self._in_battle = False
+        self._map_blocks: dict[str, bytes] | None = None  # save blocks last seen on the map
+        self._battle_blocks: dict[str, bytes] | None = None  # at the start of the current battle
+        self._last_tick = 0.0
 
     def _log(self, record: dict) -> None:
         if self.path.exists() and self.path.stat().st_size > LOG_LIMIT:
@@ -145,7 +163,11 @@ class Probe:
         holder = ptr(BATTLE)
         B = ptr(holder + BATTLE_PLAYER) if holder else 0
         char = ptr(B + BATTLE_CHARACTER) if B else 0
-        return (B, char) if char else None
+        raw = self.g.read(char + 0x28, 8) if char else None  # HP, max HP: a stale object stays on the map (seen on
+        if not raw:                                           # Eden 2026-11-02), as live_hook._battle_character checks
+            return None
+        hp, top = struct.unpack("<ff", raw)
+        return (B, char) if 400 <= top <= 60000 and -1 <= hp <= top + 1 else None
 
     @staticmethod
     def _bytes_diff(old: bytes | None, new: bytes | None) -> list:
@@ -224,6 +246,12 @@ class Probe:
     # (field off the save manager, offset, length) of the save-backed blocks quest rewards and heroes live in
     SAVE_BLOCKS = {"quests": (0x560, 0x809, 1101), "profile": (0x588, 0, 4 * 0xC30), "flags": (0x5A0, 0, 0x33E0),
                    "research": (0x578, 0, 0xFA0), "heroes": (0x580, 0x224, 21 * 0x20)}
+    # optional (0.9.73): blocks earlier surveys saw quest rewards in; read at the largest size that works
+    EXTRA_BLOCKS = {"story": (0x550, 0, 0x1800), "dyes": (0x570, 0, 0x3000), "states": (0x5A8, 0, 0x800),
+                    "p5d8": (0x5D8, 0, 0x400)}
+    # rupees and materials (spent and found all the time), in each of the profile's four copies (stride 0xC30)
+    NOISE = {"profile": tuple(r for k in range(4) for r in ((0x1E8 + k * 0xC30, 0x1EC + k * 0xC30),
+                                                          (0x3E4 + k * 0xC30, 0x3E4 + 2 * 200 + k * 0xC30)))}
 
     def _read_save_blocks(self) -> dict[str, bytes] | None:
         from .live_hook import MANAGER
@@ -239,7 +267,46 @@ class Probe:
             if not data:
                 return None
             blocks[name] = data
+        for name, (field, off, n) in self.EXTRA_BLOCKS.items():
+            raw = self.g.read(P + field, 8)
+            base = struct.unpack("<Q", raw)[0] if raw else 0
+            while _ptr(base) and n >= 0x100:
+                data = self.g.read(base + off, n)
+                if data:
+                    blocks[name] = data
+                    break
+                n //= 2
         return blocks
+
+    def _diff_blocks(self, old: dict[str, bytes], new: dict[str, bytes], skip_noise: bool = False) -> dict[str, list]:
+        """Changed bytes per block (all blocks but quest states and hero rows, which have their own findings)."""
+        out = {}
+        for name, data in new.items():
+            if name in ("quests", "heroes") or name not in old:
+                continue
+            diff = self._bytes_diff(old[name], data)
+            if skip_noise:
+                ranges = self.NOISE.get(name, ())
+                diff = [d for d in diff if not any(a <= int(d[0], 16) < b for a, b in ranges)]
+            if diff:
+                out[name] = diff
+        return out
+
+    def _map_cursor(self) -> list[int] | None:
+        """The world-map cursor's (id, kind) as last highlighted ([P+0x5A8]+0x148 u16 id, +0x14A kind)."""
+        from .live_hook import MANAGER
+        raw = self.g.read(MANAGER, 8)
+        P = struct.unpack("<Q", raw)[0] if raw else 0
+        raw = self.g.read(P + 0x5A8, 8) if _ptr(P) else None
+        block = struct.unpack("<Q", raw)[0] if raw else 0
+        raw = self.g.read(block + 0x148, 4) if _ptr(block) else None
+        return [struct.unpack_from("<H", raw)[0], raw[2]] if raw else None
+
+    def game_lost(self, reason: str) -> None:
+        """The connection to the game dropped: what the client last wrote and what the game was doing (crashes)."""
+        self.record({"finding": "game_lost", "reason": reason, "flow": self._flow, "in_battle": self._in_battle,
+                     "since_tick": round(time.time() - self._last_tick, 1) if self._last_tick else None,
+                     "last_writes": list(self._recent_writes)})
 
     def _watch_save(self) -> None:
         """Quest hand-ins: which save bytes changed with each quest that turned done (reward addresses for every quest
@@ -252,9 +319,28 @@ class Probe:
         names = {i: n for n, i in S.QUEST_STATE_IDS.items()}
         done = [i for i in range(len(new["quests"])) if new["quests"][i] == 3 and old["quests"][i] != 3]
         if done and len(done) <= 3:  # a hand-in (not a save load)
-            diffs = {k: self._bytes_diff(old[k], new[k]) for k in ("profile", "flags", "research")}
+            diffs = self._diff_blocks(old, new)
+            for k in ("profile", "flags", "research"):
+                diffs.setdefault(k, [])
             self._finding({"finding": "quest_done", "quests": [[i, names.get(i)] for i in done], **diffs},
                           f"Research: quest hand-in recorded ({', '.join(str(names.get(i, i)) for i in done)})")
+        elif not done and not self._in_battle:
+            changes = self._diff_blocks(old, new, skip_noise=True)
+            count = sum(len(v) for v in changes.values())
+            if 0 < count <= 60:  # (a save load or New Game changes far more)
+                self.record({"finding": "state_change", "cursor": self._map_cursor(), "flow": self._flow, **changes})
+        in_battle = self._battle() is not None
+        if in_battle and not self._in_battle:  # a mission starts: what changed since the map (difficulty, party)
+            self._battle_blocks = new
+            changes = self._diff_blocks(self._map_blocks or old, new)
+            self.record({"finding": "mission_start", "cursor": self._map_cursor(), "flow": self._flow, **changes})
+        elif self._in_battle and not in_battle and self._battle_blocks:  # back on the map / results
+            changes = self._diff_blocks(self._battle_blocks, new)
+            self.record({"finding": "mission_end", "cursor": self._map_cursor(), "flow": self._flow,
+                         **{k: v[:120] for k, v in changes.items()}})
+        if not in_battle:
+            self._map_blocks = new
+        self._in_battle = in_battle
         for slot in range(21):
             a = old["heroes"][slot * 0x20:(slot + 1) * 0x20]
             b = new["heroes"][slot * 0x20:(slot + 1) * 0x20]
@@ -315,6 +401,7 @@ class Probe:
     def tick(self) -> None:
         if not self.enabled:
             return
+        self._last_tick = time.time()
         self.watch()
         now = time.time()
         self.discover()  # three pointer reads: the battle object comes and goes with missions
@@ -344,6 +431,7 @@ class Probe:
         now = time.time()
         while WRITE_JOURNAL:
             at, va, data, caller = WRITE_JOURNAL.popleft()
+            self._recent_writes.append([round(at, 2), hex(va), data.hex(), caller])
             if caller in ONE_SHOT_WRITERS:
                 continue  # DeathLink: the game is meant to change these right after
             times = [t for t in self._writes.get(va, []) if now - t < FIGHT_WINDOW] + [at]
@@ -362,7 +450,9 @@ class Probe:
             if len(self._writes.get(va, [])) > 1:
                 continue  # written again since: a forced value, not a one-off
             now_bytes = self.g.read(va, len(data))
-            if now_bytes is not None and now_bytes != data:
+            if now_bytes is not None and now_bytes != data and caller in PLAYER_USES:
+                self._log({"finding": "used", "address": hex(va), "wrote": data.hex(), "now": now_bytes.hex(), "by": caller})
+            elif now_bytes is not None and now_bytes != data:
                 self._finding({"finding": "reverted", "address": hex(va), "wrote": data.hex(), "now": now_bytes.hex(),
                                "by": caller}, f"Research: the game undid a client write ({caller} at {va:#x})")
 

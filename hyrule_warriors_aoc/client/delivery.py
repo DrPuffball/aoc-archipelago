@@ -4,12 +4,14 @@ while Ryujinx is not running (SaveFileTarget).
 
 What is applied:
   Rupee Pouch          +RUPEE_POUCH rupees
-  Material Bundle      +5 each of 3 base-game materials (fixed per item, so a re-run gives the same)
+  Material Bundles     Small 10 each of 3, Material Bundle 15 each of 5, Large 25 each of 8 base-game materials
+                       (data.MATERIAL_BUNDLES; fixed per item, so a re-run gives the same)
   Character XP Gift    +1 level to your lowest-level unlocked hero
-  Weapon XP Gift       live only: +1 level to the equipped weapon of your lowest such hero (up to the game's cap)
   Hearty Meal          cooking ingredients (Hearty Durian x5, Hyrule Herb x5)
-  Extra Weapon         live only: one random base-game weapon for a hero you have (fixed per item); counted like
-                       received weapons, so it never sends a weapon check
+  Extra Weapon         live only: random base-game weapons for heroes you have (fixed per item), counted like
+  Weapon Bundles       received weapons so they never send a weapon check: Extra Weapon 1, Weapon Bundle 3, Large
+                       Weapon Bundle 5, each for a different hero where possible (data.WEAPON_BUNDLES). Weapon XP Gift
+                       (older seeds) gives 1 too: a written weapon level doesn't last (the game recomputes it from XP)
   Heroes               live only: locked/unlocked to match the seed (see hero_targets)
 
 Consumables are counted in a small per-seed ledger (one JSON file per seed and slot), so each one is applied
@@ -26,20 +28,21 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from ..data import WEAPON_BY_NAME, WEAPONS
+from ..data import MATERIAL_BUNDLES, WEAPON_BUNDLES, WEAPON_BY_NAME, WEAPONS
 from ..data_save import WEAPON_KINDS
 from ..items import WEAPON_PREFIX
 from .savefile import SavePatch
 
 RUPEE_POUCH = 1000
-CONSUMABLES = ("Rupee Pouch", "Material Bundle", "Character XP Gift", "Extra Weapon", "Weapon XP Gift", "Hearty Meal")
+CONSUMABLES = ("Rupee Pouch", "Material Bundle", "Character XP Gift", "Extra Weapon", "Weapon XP Gift", "Hearty Meal",
+               "Small Material Bundle", "Large Material Bundle", "Weapon Bundle", "Large Weapon Bundle")
 STATE_DIR = Path.home() / "AoC_Archipelago"
 BACKUPS_KEPT = 20
 
 
 class Target(Protocol):
     def add_rupees(self, amount: int) -> str: ...
-    def material_bundle(self, seed: int) -> str: ...
+    def material_bundle(self, seed: int, kinds: int, amount: int) -> str: ...
     def level_up(self, characters: list[str]) -> str: ...
     def hearty_meal(self) -> str: ...
 
@@ -57,8 +60,8 @@ class SaveFileTarget:
     def add_rupees(self, amount: int) -> str:
         return self.patch.add_rupees(amount)
 
-    def material_bundle(self, seed: int) -> str:
-        return self.patch.material_bundle(seed=seed)
+    def material_bundle(self, seed: int, kinds: int = 5, amount: int = 15) -> str:
+        return self.patch.material_bundle(seed=seed, kinds=kinds, amount=amount)
 
     def level_up(self, characters: list[str]) -> str:
         return self.patch.level_up(characters)
@@ -89,6 +92,7 @@ class Delivery:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
         safe = re.sub(r"[^\w.-]+", "_", f"{seed}_{slot}")
         self.state_file = STATE_DIR / f"{safe}.json"
+        self.skip_dlc = False  # DLC failsafe (the game has no Expansion Pass): DLC heroes' weapons are not written
         self.state = {"applied": 0, "baseline": None, "log": []}
         if self.state_file.is_file():
             try:
@@ -145,28 +149,35 @@ class Delivery:
         done: list[str] = []
         end = len(items)
         for k, name in enumerate(new, start=self.state["applied"]):
-            if (name.startswith(WEAPON_PREFIX) or name in ("Extra Weapon", "Weapon XP Gift")) and not hasattr(target, "give_weapon"):
+            if (name.startswith(WEAPON_PREFIX) or name in WEAPON_BUNDLES) and not hasattr(target, "give_weapon"):
                 end = k  # weapons go in only through the live hook: wait here until the game is running
                 break
             if name == "Rupee Pouch":
                 done.append(f"Rupee Pouch: {target.add_rupees(RUPEE_POUCH)}")
-            elif name == "Material Bundle":
-                done.append(f"Material Bundle: {target.material_bundle(seed=k)}")
+            elif name in MATERIAL_BUNDLES:
+                kinds, amount = MATERIAL_BUNDLES[name]
+                done.append(f"{name}: {target.material_bundle(seed=k, kinds=kinds, amount=amount)}")
             elif name == "Character XP Gift":
                 done.append(f"Character XP Gift: {target.level_up(sorted(heroes))}")
-            elif name == "Weapon XP Gift":
-                done.append(f"Weapon XP Gift: {target.weapon_level_up(sorted(heroes))}")
             elif name == "Hearty Meal":
                 done.append(target.hearty_meal())  # (says "Hearty Meal: ..." itself)
-            elif name.startswith(WEAPON_PREFIX) or name == "Extra Weapon":
-                weapon = name[len(WEAPON_PREFIX):] if name != "Extra Weapon" else extra_weapon(heroes, k)
-                if weapon is None:
-                    done.append("Extra Weapon: no hero to give it to")
+            elif name.startswith(WEAPON_PREFIX) or name in WEAPON_BUNDLES:
+                weapons = [name[len(WEAPON_PREFIX):]] if name not in WEAPON_BUNDLES else extra_weapons(heroes, k, WEAPON_BUNDLES[name])
+                if not weapons:
+                    done.append(f"{name}: no hero to give it to")
                     continue
-                given = target.give_weapon(weapon, WEAPON_BY_NAME[weapon].character)
-                done.append(f"Extra Weapon: {given}" if name == "Extra Weapon" else given)
-                given = self.state.setdefault("weapons_given", {})
-                given[weapon] = given.get(weapon, 0) + 1
+                results = []
+                if self.skip_dlc:
+                    from ..data import DLC_CHARACTERS
+                    if any(WEAPON_BY_NAME[w].character in DLC_CHARACTERS for w in weapons):
+                        done.append(f"{name}: skipped (no Expansion Pass in the game)")
+                        weapons = [w for w in weapons if WEAPON_BY_NAME[w].character not in DLC_CHARACTERS]
+                for weapon in weapons:
+                    results.append(target.give_weapon(weapon, WEAPON_BY_NAME[weapon].character))
+                    given = self.state.setdefault("weapons_given", {})
+                    given[weapon] = given.get(weapon, 0) + 1
+                if results:
+                    done.append(f"{name}: {', '.join(results)}" if name in WEAPON_BUNDLES else results[0])
         if end > self.state["applied"]:
             self.state["applied"] = end
             self.note(done)
@@ -178,6 +189,21 @@ def extra_weapon(heroes: set[str], seed: int) -> str | None:
     """The weapon an Extra Weapon item gives: a base-game weapon of one of your heroes, the same for the same item."""
     choices = sorted(w.name for w in WEAPONS if not w.dlc and w.character in heroes and w.name in WEAPON_KINDS)
     return random.Random(seed).choice(choices) if choices else None
+
+
+def extra_weapons(heroes: set[str], seed: int, count: int) -> list[str]:
+    """A weapon filler's weapons: the first is extra_weapon's (so an Extra Weapon item gives what it always gave), the
+    rest each for a hero not yet in the bundle while there is one."""
+    first = extra_weapon(heroes, seed)
+    if first is None:
+        return []
+    out = [first]
+    rng = random.Random(seed * 31 + count)
+    for _ in range(count - 1):
+        used = {WEAPON_BY_NAME[w].character for w in out}
+        fresh = {h for h in heroes if h not in used}
+        out.append(extra_weapon(fresh, rng.randrange(1 << 30)) or extra_weapon(heroes, rng.randrange(1 << 30)))
+    return out
 
 
 def hero_targets(received: set[str], available_missions: list[str], forced: dict[str, tuple[str, ...]],

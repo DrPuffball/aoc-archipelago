@@ -32,7 +32,9 @@ BASE_CHARACTERS = [
     "Great Fairies", "Monk Maz Koshia", "Terrako", "Calamity Ganon",
 ]
 # Expansion Pass characters (UNVERIFIED names/availability); only used when include_dlc is on.
-DLC_CHARACTERS = ["Purah & Robbie", "Sooga"]
+# The Battle-Tested Guardian (hero slot 18) joined in 0.9.74 (granted and played in game, 2026-11-02); appended last so
+# every earlier item id stays the same.
+DLC_CHARACTERS = ["Purah & Robbie", "Sooga", "Battle-Tested Guardian"]
 ALL_CHARACTERS = BASE_CHARACTERS + DLC_CHARACTERS
 
 # ---------------------------------------------------------------------------------------
@@ -293,9 +295,9 @@ Fortified Flail | Link | dlc
 Master Cycle | Zelda | dlc
 Master Cycle Hunter | Zelda | dlc
 Master Cycle Sentinel | Zelda | dlc
-Battle-Tested Screw |  | dlc
-Battle-Tested Spring |  | dlc
-Battle-Tested Gear |  | dlc
+Battle-Tested Screw | Battle-Tested Guardian | dlc
+Battle-Tested Spring | Battle-Tested Guardian | dlc
+Battle-Tested Gear | Battle-Tested Guardian | dlc
 Prototype Sheikah Arms | Purah & Robbie | dlc
 Refined Sheikah Arms | Purah & Robbie | dlc
 Ultimate Sheikah Arms | Purah & Robbie | dlc
@@ -364,13 +366,37 @@ FILLER_ITEMS = [
     "Rupee Pouch",
     "Material Bundle",
     "Hearty Meal",
+    "Small Material Bundle",  # 0.9.73+ (append only: item ids follow this order)
+    "Large Material Bundle",
+    "Weapon Bundle",  # 0.9.74+
+    "Large Weapon Bundle",
 ]
+# Material bundle sizes: (different materials, amount of each). User 2026-11-02: filler should feel substantial, weighted
+# towards materials, in varying sizes.
+MATERIAL_BUNDLES = {
+    "Small Material Bundle": (3, 10),
+    "Material Bundle": (5, 15),
+    "Large Material Bundle": (8, 25),
+}
+# Weapons per weapon filler item, each for a different hero where possible. User 2026-11-02: drop the Weapon XP Gift
+# idea (a written weapon level only lasts until the game recomputes it from XP) and give more free weapons instead, in
+# sizes. Weapon XP Gift stays an item for older seeds and now gives one weapon too; new seeds don't use it.
+WEAPON_BUNDLES = {
+    "Extra Weapon": 1,
+    "Weapon XP Gift": 1,
+    "Weapon Bundle": 3,
+    "Large Weapon Bundle": 5,
+}
 DEFAULT_FILLER_WEIGHTS = {
-    "Character XP Gift": 30,
-    "Weapon XP Gift": 30,
+    "Character XP Gift": 20,
+    "Weapon XP Gift": 0,
     "Extra Weapon": 10,
-    "Rupee Pouch": 15,
-    "Material Bundle": 10,
+    "Weapon Bundle": 12,
+    "Large Weapon Bundle": 6,
+    "Rupee Pouch": 12,
+    "Small Material Bundle": 15,
+    "Material Bundle": 20,
+    "Large Material Bundle": 10,
     "Hearty Meal": 5,
 }
 

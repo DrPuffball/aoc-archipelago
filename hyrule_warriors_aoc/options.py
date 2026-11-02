@@ -96,16 +96,16 @@ class SideCheckDensity(Range):
     default = 100
 
 
-class IncludeDLC(Toggle):
+class IncludeDLC(DefaultOnToggle):
     """
-    Include Expansion Pass content: the EX challenges and quests, Vicious Monster Battles, DLC weapons, and the
-    characters Purah & Robbie and Sooga. Off (default): the DLC is left exactly as in the vanilla game (no checks,
-    no items, the client never locks or changes it). On is EXPERIMENTAL: Purah & Robbie and Sooga can be received
-    but do not show on the Allies screen yet.
+    Include the Expansion Pass (both waves needed): the Guardian of Remembrance story missions count as story missions
+    (goal, unlock items), the EX challenges and quests are checks like the base game's, DLC weapons, and the heroes
+    Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts stay playable but never hold checks
+    (except Forgotten Temple). If the game turns out not to have the DLC, the client keeps the seed winnable: the DLC
+    is taken out of the goal and its checks are sent.
     """
 
     display_name = "Include DLC"
-    visibility = Visibility.none  # hidden for the public release (DLC heroes do not show in Allies); still read from YAML
 
 
 class MissionOrder(Choice):
@@ -204,22 +204,41 @@ class Goal(Choice):
     Story: clear all 20 main story missions.
     Story And Side Missions: also complete goal_side_missions challenges and quests.
     Story And All Characters: also unlock every character.
-    Story And Boss Rush: also beat the Divine Beast battles and the Versus boss challenges after the story.
     """
 
     display_name = "Goal"
     option_story = 0
     option_story_and_side_missions = 1
     option_story_and_all_characters = 2
-    option_story_and_boss_rush = 3
     default = option_story
+
+
+class GameMode(Choice):
+    """
+    Standard: the usual run (story, challenges and quests, as the other options set them).
+    Both modes open every service (shops, stables, dye shop, Smithy, Sheikah Sensor) from the start and put every
+    check on level clears, spread evenly over the levels (bonus checks sent with each clear). Recipes are items
+    (Progressive Recipe); with no recipe items in quest_reward_items you know every recipe from the start.
+    Story Only: every check is on story missions (the DLC story too with include_dlc): no challenge or quest checks.
+    Each story clear opens one new random story mission (The Battle of
+    Hyrule Field is open). The goal: goal_story_missions story clears (goal_challenges is ignored).
+    Challenges Only: every check is on challenge missions; story missions (except The Battle of Hyrule Field) and map
+    quests don't appear. A few challenges are open at the start and each clear opens 3-8 more at random. The goal:
+    goal_challenges clears (0 = 50); story options and final_mission_goal are ignored.
+    """
+
+    display_name = "Game Mode"
+    option_standard = 0
+    option_story_only = 1
+    option_challenges_only = 2
+    default = option_standard
 
 
 class PostStoryUnlock(Range):
     """
     Post-story challenges and quests mix into the run before the goal (the client opens them in game).
-    With side_unlocks shuffled (default) they join the random openings and can open at any time (any number below 20).
-    With side_unlocks game_rules they open after this many story clears.
+    With a randomized unlock order (Challenge / Quest Unlock Order, default) they join the random openings and can
+    open at any time (any number below 20). With a vanilla unlock order they open after this many story clears.
     20 = vanilla: they open after the whole story, and with a story-only goal they hold no checks.
     Post-story weapon drops can't be moved and still wait for the whole story.
     """
@@ -230,16 +249,27 @@ class PostStoryUnlock(Range):
     default = 10  # (user, 2026-10-28: post-story content mixed in before the goal; 20 = vanilla, no checks on it)
 
 
+class FinalMissionGoal(DefaultOnToggle):
+    """
+    The Future of Hyrule (the final story mission) is the goal: it stays closed, with no unlock item, until you have
+    cleared goal_story_missions - 1 other story missions and goal_challenges challenges (plus the goal option's
+    extras). Then it opens, and clearing it wins. Off: the goal is just those clears, in any order.
+    """
+
+    display_name = "The Future of Hyrule Is the Goal"
+
+
 class GoalStoryMissions(Range):
     """
-    How many main story missions the goal needs (any of them, in whatever order the seed opens them). 20 = all.
-    Post-story content still opens only after the whole story, as in the game.
+    How many story missions the goal needs (any of them, in whatever order the seed opens them). The base game has 20;
+    with include_dlc the 8 Guardian of Remembrance missions are story missions too (28). A number above what the
+    seed has means all of them. Post-story content still opens only after the base story, as in the game.
     """
 
     display_name = "Goal Story Missions"
     range_start = 2
-    range_end = 20
-    default = 20
+    range_end = 28
+    default = 28
 
 
 class GoalChallenges(Range):
@@ -250,7 +280,47 @@ class GoalChallenges(Range):
 
     display_name = "Goal Challenges"
     range_start = 0
-    range_end = 200
+    range_end = 168  # the base game's challenges (no Expansion Pass), so the goal is always reachable
+    default = 0
+
+
+class DifficultyChecks(Choice):
+    """
+    Extra checks for clearing story missions (and challenges, see Difficulty Checks on Challenges) on harder
+    difficulties: every difficulty from Normal up to this one adds one check per mission. A clear sends the checks of
+    its difficulty and of every easier one (a Hard clear also sends the Normal check), so nothing has to be replayed.
+    Off: one check per mission, any difficulty. The client reads the game's own per-difficulty clear records.
+    Ignored when Difficulty Lock is on.
+    """
+
+    display_name = "Difficulty Checks"
+    option_off = 0
+    option_normal = 1
+    option_hard = 2
+    option_very_hard = 3
+    default = 0
+
+
+class DifficultyChecksChallenges(DefaultOnToggle):
+    """With Difficulty Checks: challenges get the extra per-difficulty checks too (story missions always do)."""
+
+    display_name = "Difficulty Checks on Challenges"
+
+
+class DifficultyLock(Choice):
+    """
+    Lock clears to a difficulty, so lowering it can't be used to cheese: a story mission or challenge only counts
+    (sends its checks, opens what it opens, counts for the goal) when cleared on this difficulty or a harder one. A clear
+    on an easier difficulty counts for nothing and the client tells you to replay it. Every check of a mission comes
+    from that one clear (no per-difficulty checks). The Battle of Hyrule Field, already cleared in the starter save, is
+    exempt. The game's own difficulty menu is not changed.
+    """
+
+    display_name = "Difficulty Lock"
+    option_off = 0
+    option_normal = 1
+    option_hard = 2
+    option_very_hard = 3
     default = 0
 
 
@@ -291,7 +361,7 @@ class LockedFeatures(OptionSet):
 
     display_name = "Locked Features"
     valid_keys = frozenset(LOCKABLE_FEATURES)
-    default = frozenset({"Cooking", "Terrako Guardian"})
+    default = frozenset({"Terrako Guardian"})  # cooking is open from the start unless locked here (user, 2026-11-02)
 
 
 class SheikahRunes(Choice):
@@ -431,11 +501,44 @@ class SideUnlocks(Choice):
     option_shuffled = 0
     option_game_rules = 1
     default = option_shuffled
+    visibility = Visibility.none  # 0.9.73: Challenge Unlock Order / Quest Unlock Order (game_rules here still wins)
+
+
+class ChallengeUnlockOrder(Choice):
+    """
+    How challenges open.
+    Randomized: a few are open from the start and 2-4 more challenges or quests open after every completion (story
+    clear, challenge or quest), in a random order; the client opens them in game. Heroes and runes a challenge needs
+    still apply.
+    Vanilla: challenges open as in the game, following challenge_logic.
+    """
+
+    display_name = "Challenge Unlock Order"
+    option_randomized = 0
+    option_vanilla = 1
+    default = option_randomized
+
+
+class QuestUnlockOrder(Choice):
+    """
+    How quests open.
+    Randomized: a few are open from the start and 2-4 more challenges or quests open after every completion (story
+    clear, challenge or quest), in a random order; the client opens them in game. Reward items a quest needs still
+    apply.
+    Vanilla: quests open as in the game (its story gates and quest prerequisites; post-story ones after
+    post_story_unlock story clears).
+    """
+
+    display_name = "Quest Unlock Order"
+    option_randomized = 0
+    option_vanilla = 1
+    default = option_randomized
 
 
 class ChallengeLogic(Choice):
     """
-    When challenge checks are expected to be available. The real unlock conditions are not verified.
+    When challenge checks are expected to be available, with Challenge Unlock Order: vanilla (randomized order
+    ignores this). The real unlock conditions are not verified.
 
     After Story: challenges are expected only once every main mission is cleared. Safe.
     By Level: each challenge is expected once the story has reached roughly its level bracket. Shorter
@@ -559,7 +662,10 @@ class WeaponItems(Range):
 class FillerWeights(OptionCounter):
     """
     Relative weights for the filler items that pad the pool. Set a weight to 0 to remove an item.
-    Character XP Gift and Weapon XP Gift grant experience, Extra Weapon grants a random weapon.
+    Character XP Gift levels up a hero. Weapons: Extra Weapon = 1 random weapon, Weapon Bundle = 3 and Large Weapon
+    Bundle = 5 (each for a different hero). Weapon XP Gift (older seeds) now also gives 1 weapon. Material bundles:
+    Small = 10 each of 3 materials, Material Bundle = 15 each of 5, Large = 25 each of 8. Rupee Pouch = 1000 rupees,
+    Hearty Meal = cooking ingredients.
     """
 
     display_name = "Filler Weights"
@@ -586,6 +692,89 @@ class QuestRewardItems(OptionCounter):
                for g in REWARD_GROUPS}
 
 
+class HintMissionUnlocks(Toggle):
+    """
+    Every story mission unlock item (mission_unlocks: items) is hinted for free when the room starts, so you can see
+    where each mission's unlock is. Off: find them the normal way.
+    """
+
+    display_name = "Auto-Hint Mission Unlocks"
+
+
+class HintHeroes(Toggle):
+    """Every hero (Character item) you can receive is hinted for free when the room starts."""
+
+    display_name = "Auto-Hint Heroes"
+
+
+class GoalBanner(DefaultOnToggle):
+    """
+    While you're on the world map, a small banner at the top of the emulator window shows your goal progress (story
+    missions, challenges and side missions still needed, and the goal difficulty). "/goal_banner on|off" in the
+    client changes it for your own game.
+    """
+
+    display_name = "Goal Progress Banner"
+
+
+class HeroLevelCap(Toggle):
+    """
+    Heroes stop at level 99: the client lets them level up in game as usual (which refills hearts and the special
+    gauge), and when one reaches 100 it puts them back to 99 a few seconds later.
+    """
+
+    display_name = "Cap Heroes at Level 99"
+
+
+class StartWithSheikahSensor(DefaultOnToggle):
+    """
+    Start with the Sheikah Sensor (the quest Needed: Researchers! is already done), so it points you to materials
+    from the first mission. Its quest holds no check, and Progressive Sheikah Sensor items are not used.
+    """
+
+    display_name = "Start with the Sheikah Sensor"
+
+
+class StartWithTrackers(Toggle):
+    """
+    Start with the treasure trackers and the Korok tracker: The Treasure Hunter's Technique, The Treasure Detector
+    (and its upgrade) and A Most Peculiar Korok are already done and hold no checks.
+    """
+
+    display_name = "Start with Treasure and Korok Trackers"
+
+
+class OpenStables(DefaultOnToggle):
+    """Every stable is open from the start: its quest is already done and holds no check, and no stable items."""
+
+    display_name = "Stables Open from the Start"
+
+
+class OpenShops(DefaultOnToggle):
+    """
+    Every shop (except the dye shop) is open from the start: their quests are already done and hold no checks, and
+    no shop items are used (overrides Shops in locked_features).
+    """
+
+    display_name = "Shops Open from the Start"
+
+
+class OpenDyeShop(DefaultOnToggle):
+    """The dye shop (Dyeing to Make Contact) is open from the start: its quest is already done and holds no check."""
+
+    display_name = "Dye Shop Open from the Start"
+
+
+class RegionHopeChecks(Toggle):
+    """
+    The "Hope of <region>" quests complete by themselves when a region's map is 100% done. On: each region's Hope
+    completion holds a check. Off (default): they hold no checks. The Hope of All Hyrule (every quest and mission on
+    the map) never holds a check: by then the goal is long done.
+    """
+
+    display_name = "Region Hope Checks"
+
+
 @dataclass
 class AgeOfCalamityOptions(PerGameCommonOptions):
     starting_character_count: StartingCharacterCount
@@ -604,6 +793,10 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     goal: Goal
     goal_side_missions: GoalSideMissions
     goal_difficulty: GoalDifficulty
+    difficulty_checks: DifficultyChecks
+    difficulty_checks_challenges: DifficultyChecksChallenges
+    difficulty_lock: DifficultyLock
+    final_mission_goal: FinalMissionGoal
     goal_story_missions: GoalStoryMissions
     post_story_unlock: PostStoryUnlock
     goal_challenges: GoalChallenges
@@ -619,6 +812,8 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     local_filler: LocalFiller
     side_missions_per_unlock: SideMissionsPerUnlock
     side_unlocks: SideUnlocks
+    challenge_unlock_order: ChallengeUnlockOrder
+    quest_unlock_order: QuestUnlockOrder
     challenge_logic: ChallengeLogic
     weapon_check_logic: WeaponCheckLogic
     mission_rewards: MissionRewards
@@ -632,6 +827,17 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     weapon_items: WeaponItems
     quest_reward_items: QuestRewardItems
     filler_weights: FillerWeights
+    hint_mission_unlocks: HintMissionUnlocks
+    hint_heroes: HintHeroes
+    hero_level_cap: HeroLevelCap
+    goal_banner: GoalBanner
+    game_mode: GameMode
+    start_with_sheikah_sensor: StartWithSheikahSensor
+    start_with_trackers: StartWithTrackers
+    open_stables: OpenStables
+    open_shops: OpenShops
+    open_dye_shop: OpenDyeShop
+    region_hope_checks: RegionHopeChecks
     death_link: DeathLink
     start_inventory_from_pool: StartInventoryPool
 
@@ -640,8 +846,11 @@ option_groups = [
     OptionGroup("Characters", [StartingCharacterCount, StartingCharacterPool, IncludeDLC]),
     OptionGroup("Checks", [WeaponChecks, ChallengeChecks, QuestChecks, SideCheckDensity, MissionOrder, FirstMission, MissionUnlocks, StartingMissionUnlocks,
                            SideMissionsPerUnlock]),
-    OptionGroup("Goal and Logic", [Goal, GoalStoryMissions, GoalChallenges, PostStoryUnlock, GoalSideMissions, GoalDifficulty, StoryParty, SideUnlocks, ChallengeLogic, WeaponCheckLogic, SheikahRunes]),
-    OptionGroup("Pace", [CatchUpLevels, MinimumCharacterLevel]),
+    OptionGroup("Goal and Logic", [GameMode, Goal, FinalMissionGoal, GoalStoryMissions, GoalChallenges, PostStoryUnlock, RegionHopeChecks, GoalSideMissions, GoalDifficulty, StoryParty, SideUnlocks, ChallengeUnlockOrder, QuestUnlockOrder, ChallengeLogic, WeaponCheckLogic, SheikahRunes]),
+    OptionGroup("Difficulty", [DifficultyChecks, DifficultyChecksChallenges, DifficultyLock]),
+    OptionGroup("Pace", [CatchUpLevels, MinimumCharacterLevel, HeroLevelCap]),
+    OptionGroup("Start Open", [StartWithSheikahSensor, StartWithTrackers, OpenStables, OpenShops, OpenDyeShop]),
+    OptionGroup("Hints", [HintMissionUnlocks, HintHeroes, GoalBanner]),
     OptionGroup("Multiworld Extras", [StuckRescueMinutes, SteadyRewards, StoryPacing, MissionHintEvery, FeaturedChallenge]),
     OptionGroup(
         "Upgrades",

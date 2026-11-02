@@ -21,7 +21,7 @@ import sys
 import time
 
 from .. import data_save as S
-from .ryujinx import MODULE_BASE, Guest, Process, ryujinx_pids
+from .ryujinx import MODULE_BASE, FastmemGuest, Guest, Process, emulator_processes
 
 MANAGER = MODULE_BASE + 0x2780A48
 PARAMS = (MODULE_BASE + 0x2780A38, 0x698, 0x60)  # [[global]+0x698]+0x60 = mission parameter table (400 rows)
@@ -75,6 +75,11 @@ MATERIALS_SEEN = 0x7A9  # u8 per material: 1 = discovered, else the menu hides i
 PROFILE_SAVED_COPY = 3 * 0xC30
 QUESTS = 0x560  # quest state bytes at +S.QUEST_STATE_LIVE
 QUEST_SAVED_COPY = 0x2550  # saved copy of the quest states, kept in step
+# The world map's own copy of each quest's state (its icon): [P+0x5A8] + 0x2DC + quest id, saved copy +0x6D0; 3 = done
+# (grey). A hand-in sets both copies; the client set only the quest block until 0.9.74, so quests it completed showed
+# orange and "available" on the map although done (user, 2026-11-02; 110 such quests read live; offsets from the
+# Marita / Akkala hand-ins).
+QUEST_MAP_STATES, QUEST_MAP_SAVED_COPY = 0x2DC, 0x6D0
 # Story flag table (save 0x14..0x8F, one byte each) at [P+0x550]+0x18C; four copies 0x700 apart: 0 current (read live,
 # even mid-mission), 3 saved, 1/2 a mission's working copies. Rune flags confirmed in game by setting/clearing them.
 STORY_FLAGS, STORY_FLAGS_OFFSET, STORY_FLAGS_COPIES = 0x550, 0x18C, (0, 3 * 0x700)
@@ -82,10 +87,15 @@ RUNE_FLAGS = {"Remote Bombs": 0x19 - 0x14, "Cryonis": 0x1A - 0x14, "Magnesis": 0
 # (Remote Bombs = the Slate: off hides the whole rune menu; confirmed in game, RESEARCH session 18)
 # Owned weapons: [P + 0x568] holds the pool objects; [[pool + 0x30]] is the current copy, [[pool + 0x48]] the
 # saved one. 2139 records of 0x90 bytes, 71 per hero (hero slot * 71). Record: +0x00 order (u32), +0x10 weapon
-# kind (u16, each hero has its own range), +0x79 level. The save stores the same pool as 81-byte records.
+# kind (u16, each hero has its own range), +0x0C XP (u32), +0x14 attack bonus (u16: shown damage = the weapon's
+# base + this), +0x78 level - 1, +0x87 rusted (1 = hidden until restored). Confirmed in game 2026-11-02: the shown
+# level follows +0x78 and the damage +0x14, and fusing recomputed both from XP (a written level does not last: the
+# Weapon XP Gift was dropped for weapon bundles in 0.9.74). +0x79 (what the gift wrote until then) is not shown;
+# game-made records hold 0..16 there (meaning unknown). The save stores the same pool as 81-byte records.
 WEAPON_POOL, WEAPON_COPIES = 0x568, (0x30, 0x48)
 WEAPON_RECORD, WEAPONS_PER_HERO, WEAPON_RECORDS = 0x90, 71, 2139
-WEAPON_KIND, WEAPON_LEVEL = 0x10, 0x79
+WEAPON_XP, WEAPON_KIND, WEAPON_LEVEL, WEAPON_ATTACK, WEAPON_RUSTED = 0x0C, 0x10, 0x78, 0x14, 0x87
+WEAPON_OLD_BYTE = 0x79  # kept as the game's own weapon rewards have it (1) in weapons the client gives
 
 
 def level_stats(stats: bytes, old: int, new: int) -> bytes:
@@ -108,13 +118,14 @@ class LiveGame:
 
     @classmethod
     def find(cls) -> "LiveGame | None":
-        """Attach to the first Ryujinx process that is running Age of Calamity with a save loaded."""
-        for pid in ryujinx_pids():
+        """Attach to the first emulator (Ryujinx or Eden) that is running Age of Calamity with a save loaded."""
+        for pid, emulator in emulator_processes():
             try:
                 proc = Process(pid)
             except OSError:
                 continue
-            guest = Guest.attach(proc)
+            guest = Guest.attach(proc) if emulator == "Ryujinx" else \
+                FastmemGuest.attach(proc, MANAGER - MODULE_BASE, lambda g: cls(g).save_ok())
             if guest:
                 game = cls(guest)
                 if game.loaded():
@@ -141,6 +152,22 @@ class LiveGame:
                 return False
             row = self._hero_row("Link")
             return row is not None and row[HERO_LEVEL] < S.HERO_LEVEL_MAX and set(row[HERO_FLAGS:HERO_FLAGS + 3]) <= {0, 1}
+        except HookError:
+            return False
+
+    def save_ok(self) -> bool:
+        """Stricter than loaded() (used to find Eden's memory layout, where empty memory passes loaded()): every save
+        block points somewhere different, the quest states look like a game's, and a mission is cleared."""
+        try:
+            if not self.loaded():
+                return False
+            if len({self._ptr(f) for f in (STORY_FLAGS, QUESTS, HEROES[0], PROFILE, 0x5A0)}) < 5:
+                return False
+            blob = self.g.read(self._ptr(QUESTS) + S.QUEST_STATE_LIVE, S.QUEST_STATE_COUNT)
+            # blob[0] == 1: the same test completed_quests() makes (on Eden it fails for a few seconds while the save
+            # loads, which dropped the fresh connection three times)
+            return blob is not None and blob[0] == 1 and max(blob) <= S.QUEST_DONE and len(set(blob)) > 1 \
+                and bool(self.cleared_records())
         except HookError:
             return False
 
@@ -235,7 +262,7 @@ class LiveGame:
         self.expect("Rupee Pouch", check, before=old, wrote=new)
         return f"+{amount} rupees (now {new})"
 
-    def material_bundle(self, seed: int, kinds: int = 3, amount: int = 5) -> str:
+    def material_bundle(self, seed: int, kinds: int = 5, amount: int = 15) -> str:
         base = self._ptr(PROFILE) + MATERIALS
         picks = random.Random(seed).sample(S.BUNDLE_MATERIALS, kinds)
         for index in picks:
@@ -267,46 +294,6 @@ class LiveGame:
             self._write(base + index * 2, struct.pack("<H", min(S.MATERIAL_MAX, old + amount)))
             self._expect_material("Hearty Meal", base + index * 2, old, min(S.MATERIAL_MAX, old + amount), index)
         return "Hearty Meal: cooking ingredients"
-
-    def weapon_level_up(self, characters: list[str]) -> str:
-        """Weapon XP Gift: +1 level to the equipped weapon of the hero whose equipped weapon is lowest, never above
-        the game's current cap (20, or 25 once A Monumental Undertaking's flag is set)."""
-        flags = self._ptr(0x5A0)
-        monument = self.g.read(flags + 0x63F, 1)
-        cap = S.WEAPON_LEVEL_CAP_MONUMENT if monument and monument[0] else S.WEAPON_LEVEL_CAP
-        pools = self._weapon_pools()
-        best = None
-        for hero in characters:
-            if hero not in S.HERO_SLOTS or not self.hero_unlocked(hero):
-                continue
-            row = self._hero_row(hero)
-            slot = row[HERO_EQUIPPED] if row else 0
-            if slot >= WEAPONS_PER_HERO:
-                continue
-            offset = (S.HERO_SLOTS[hero] * WEAPONS_PER_HERO + slot) * WEAPON_RECORD
-            record = self.g.read(pools[0] + offset, WEAPON_RECORD)
-            if not record or not struct.unpack_from("<H", record, WEAPON_KIND)[0] or record[WEAPON_LEVEL] >= cap:
-                continue
-            if best is None or record[WEAPON_LEVEL] < best[2]:
-                best = (hero, offset, record[WEAPON_LEVEL])
-        if best is None:
-            return "Weapon XP Gift: every equipped weapon is at the level cap"
-        hero, offset, level = best
-        for base in pools:
-            self._write(base + offset + WEAPON_LEVEL, bytes([level + 1]))
-        kind = struct.unpack_from("<H", self.g.read(pools[0] + offset, WEAPON_RECORD), WEAPON_KIND)[0]
-
-        def check():  # the same weapon still in that slot at the new level (or higher, from fusing)
-            record = self.g.read(self._weapon_pools()[0] + offset, WEAPON_RECORD)
-            if not record:
-                return False, "unreadable"
-            now_kind, now_level = struct.unpack_from("<H", record, WEAPON_KIND)[0], record[WEAPON_LEVEL]
-            if now_kind != kind:
-                return None, f"slot now holds another weapon (kind {now_kind}; fused, sold or moved?)"
-            return now_level >= level + 1, f"weapon level {now_level}"
-        self.expect("Weapon XP Gift", check, hero=hero, before=level, wrote=level + 1)
-        names = [n for n, kinds in S.WEAPON_KINDS.items() if kind in kinds]
-        return f"{hero}'s {names[0] if names else 'weapon'} -> level {level + 1}"
 
     def level_up(self, characters: list[str]) -> str:
         known = [c for c in characters if c in S.HERO_SLOTS and self.hero_unlocked(c)]
@@ -344,6 +331,20 @@ class LiveGame:
             return ok, f"level {now_level}, hearts/ATK/DEF {stats_now}"
         self.expect("Hero level", check, hero=character, before=old, wrote=level,
                     stats=list(struct.unpack("<3H", want)) if want else None)
+        return True
+
+    def cap_level(self, character: str, cap: int) -> bool:
+        """hero_level_cap: a hero above `cap` goes back to `cap` with that level's XP (current and saved copy);
+        hearts/ATK/DEF are kept, so the level-up the game just gave still counted. Returns True if it changed."""
+        level = self.hero_level(character) if character in S.HERO_SLOTS else 0
+        if level <= cap:
+            return False
+        addr = self._hero_addr(character)
+        for copy in (0, HERO_SAVED_COPY):
+            self._write(addr + copy + HERO_XP, struct.pack("<I", S.HERO_XP_TABLE[cap - 1]))
+            self._write(addr + copy + HERO_LEVEL, bytes([cap - 1]))
+        self.expect("Hero level cap", lambda: (self.hero_level(character) <= cap, f"level {self.hero_level(character)}"),
+                    hero=character, before=level, wrote=cap)
         return True
 
     def raise_levels(self, characters: list[str], level: int) -> list[str]:
@@ -461,7 +462,7 @@ class LiveGame:
         record = bytearray(WEAPON_RECORD)
         struct.pack_into("<I", record, 0, count)
         struct.pack_into("<H", record, WEAPON_KIND, S.WEAPON_KINDS[name][0])
-        record[WEAPON_LEVEL] = 1
+        record[WEAPON_OLD_BYTE] = 1  # level 1 (+0x78 = 0); shown in game this way (2026-11-02)
         offset = (S.HERO_SLOTS[hero] * WEAPONS_PER_HERO + slot) * WEAPON_RECORD
         for base in self._weapon_pools():
             self._write(base + offset, bytes(record))
@@ -483,7 +484,7 @@ class LiveGame:
             return False
         record = bytearray(WEAPON_RECORD)
         struct.pack_into("<H", record, WEAPON_KIND, kind)
-        record[WEAPON_LEVEL] = 1
+        record[WEAPON_OLD_BYTE] = 1
         offset = S.HERO_SLOTS[character] * WEAPONS_PER_HERO * WEAPON_RECORD
         for base in self._weapon_pools():
             self._write(base + offset, bytes(record))
@@ -523,7 +524,9 @@ class LiveGame:
         received items even after the world-map quest is done. Returns the categories changed."""
         base = self._ptr(PROFILE) + S.UPGRADE_LEVELS
         current = self.g.read(base, S.UPGRADE_CATEGORIES)
-        if current is None or max(current) > 5:
+        # Expansion Pass quests go past 5 (EX Safe Roads, Safe Rides / EX Burning Desire took category 24 from 5 to 6,
+        # 2026-11-02); until 0.9.74 a 6 here stopped the client enforcing every upgrade.
+        if current is None or max(current) > 9:
             raise HookError("upgrade levels not recognised")
         changed = []
         for category, level in sorted(levels.items()):
@@ -602,8 +605,17 @@ class LiveGame:
         if blob is None or max(blob) > S.QUEST_DONE:
             raise HookError("quest states not recognised")
         changed = []
+        try:  # the icons are cosmetic: never let them stop the quest states
+            map_base = self._ptr(MISSION_STATES_BLOCK) + QUEST_MAP_STATES
+            maps = [(copy, self.g.read(map_base + copy, S.QUEST_STATE_COUNT)) for copy in (0, QUEST_MAP_SAVED_COPY)]
+        except HookError:
+            maps = []
         for name, want in sorted(states.items()):
             i = S.QUEST_STATE_IDS[name]
+            if want == S.QUEST_DONE:
+                for copy, icons in maps:
+                    if icons is not None and icons[i] != S.QUEST_DONE:
+                        self._write(map_base + copy + i, bytes([S.QUEST_DONE]))
             if (want == 2 and blob[i] >= 2) or (want == -1 and blob[i] != 2):
                 continue  # already open / never undo a quest the player has handed in
             want = abs(want)
@@ -613,6 +625,30 @@ class LiveGame:
                 changed.append(name)
         return changed
 
+    def _quest_map_done(self, i: int) -> None:
+        """Show quest state id `i` as done on the world map too (both copies; cosmetic, so a missing block is skipped)."""
+        try:
+            base = self._ptr(MISSION_STATES_BLOCK) + QUEST_MAP_STATES + i
+        except HookError:
+            return
+        for copy in (0, QUEST_MAP_SAVED_COPY):
+            raw = self.g.read(base + copy, 1)
+            if raw is not None and raw[0] != S.QUEST_DONE:
+                self._write(base + copy, bytes([S.QUEST_DONE]))
+
+    def set_quest_effects(self, quests: set[str]) -> list[str]:
+        """Set the bytes these done quests would have set in game (data_save.QUEST_EFFECTS). Returns quests changed."""
+        changed = []
+        for quest in sorted(quests):
+            for block, offset, value in S.QUEST_EFFECTS.get(quest, ()):
+                addr = self._ptr(block) + offset
+                raw = self.g.read(addr, 1)
+                if raw is not None and raw[0] != value:
+                    self._write(addr, bytes([value]))
+                    if quest not in changed:
+                        changed.append(quest)
+        return changed
+
     def complete_quest(self, name: str) -> bool:
         """Mark a quest done (current and saved copy); the Smithy opens this way. Returns True if it changed."""
         base = self._ptr(QUESTS) + S.QUEST_STATE_LIVE
@@ -620,6 +656,7 @@ class LiveGame:
         if blob is None or max(blob) > S.QUEST_DONE:
             raise HookError("quest states not recognised")
         i = S.QUEST_STATE_IDS[name]
+        self._quest_map_done(i)
         if blob[i] == S.QUEST_DONE:
             return False
         for copy in (0, QUEST_SAVED_COPY):
@@ -722,9 +759,25 @@ class LiveGame:
         flow = self._flow()
         if not real or not flow or flow[1:] != (FLOW_PLAYING, 0):
             return False
+        self._kill_undo = (real, self.g.read(real, 4), char + CHAR_HP, self.g.read(char + CHAR_HP, 4), flow[0])
         self._write(real, struct.pack("<f", 0.0))
         self._write(char + CHAR_HP, struct.pack("<f", 0.0))
         self._request_flow(flow[0], FLOW_DEFEATED)
+        return True
+
+    def undo_kill(self) -> bool:
+        """The game never took the "defeated" request (seen in a Divine Beast battle: 0 HP, no defeat screen, a
+        softlock): give the HP back and withdraw the request, so play goes on. [guess: untested in game]"""
+        undo = getattr(self, "_kill_undo", None)
+        self._kill_undo = None
+        if not undo:
+            return False
+        real, real_hp, shown, shown_hp, flow = undo
+        if real_hp:
+            self._write(real, real_hp)
+        if shown_hp:
+            self._write(shown, shown_hp)
+        self._write(flow + FLOW_REQUEST, struct.pack("<I", 0))
         return True
 
     def restart_mission(self) -> bool:
@@ -876,23 +929,29 @@ class LiveGame:
                         self._write(addr + record, bytes([want]))
         return changed
 
-    def set_story_parties(self, heroes: list[str] | None) -> list[str]:
-        """Give every story mission this party in place of its forced heroes (hero slots only; Divine Beast
-        segments and empty slots stay; a mission's support heroes are skipped). heroes=None puts the vanilla parties
-        back. Returns the records changed."""
+    def set_story_parties(self, heroes: list[str] | None, challenges: bool = False) -> list[str]:
+        """Give every story mission (with challenges=True every challenge too, the Expansion Pass story included) this
+        party in place of its forced heroes (hero slots only; Divine Beast segments and empty slots stay; a mission's
+        support heroes are skipped). heroes=None puts the vanilla parties back. Returns the records changed."""
         table = self._params()
         changed = []
-        for record, vanilla_hex in S.VANILLA_STORY_PARTY.items():
+        rows = {**S.VANILLA_STORY_PARTY, **(S.VANILLA_CHALLENGE_PARTY if challenges or heroes is None else {})}
+        for record, vanilla_hex in rows.items():
             vanilla = bytes.fromhex(vanilla_hex)
             want = bytearray(vanilla)
             if heroes is not None:
                 # a forced slot keeps its vanilla hero when that hero is yours (the story's own pilots, e.g. Sidon in
                 # Water and Fire); the others get your strongest remaining heroes (user: the client forced Calamity
                 # Ganon over Sidon)
-                support = S.STORY_SUPPORT.get(record, ())
+                # The free slots stay the player's choice, so a forced slot whose hero you don't have takes your
+                # lowest-level heroes, never one the mission needs from the start (forced slots can join late:
+                # Mipha put in Daruk's slot 4 of Relentless as a Waterfall softlocked it - user, 2026-11-01).
+                support = (set(S.STORY_SUPPORT.get(record, ())) | set(S.STORY_NEEDED_EARLY.get(record, ()))
+                           | set(S.CHALLENGE_SUPPORT.get(record, ())))
                 yours = {S.HERO_SLOTS[h] + 1 for h in heroes if h in S.HERO_SLOTS}
                 kept = {b for b in vanilla if 0 < b < 40 and b in yours}
-                pick = iter(S.HERO_SLOTS[h] + 1 for h in heroes
+                order = reversed(heroes) if 0 in vanilla else heroes  # all slots forced: your strongest
+                pick = iter(S.HERO_SLOTS[h] + 1 for h in order
                             if h in S.HERO_SLOTS and h not in support and S.HERO_SLOTS[h] + 1 not in kept)
                 for i, b in enumerate(vanilla):
                     if 0 < b < 40:

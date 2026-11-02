@@ -17,7 +17,7 @@ class TestManySeeds(WorldTestBase):
     run_default_tests = False  # this class does its own, repeated, fills
 
     def test_every_combination_is_beatable_across_seeds(self) -> None:
-        combos = itertools.product(SIDES, [False, True], ["vanilla", "shuffle_all", "items"], [0, 2], [0, 1], [(4, 100), (1, 20)], [0, 1], [0, 1, 2, 3])
+        combos = itertools.product(SIDES, [False, True], ["vanilla", "shuffle_all", "items"], [0, 2], [0, 1], [(4, 100), (1, 20)], [0, 1], [0, 1, 2])
         for side, dlc, order, gating, logic, (starters, density), party, goal in combos:
             if (gating or goal == 1) and not side:
                 continue

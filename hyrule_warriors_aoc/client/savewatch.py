@@ -30,18 +30,34 @@ def ryujinx_data_roots() -> list[str]:
     return [r for r in dict.fromkeys(roots) if os.path.isdir(r)]
 
 
+AOC_TITLE = "01002B00111A2000"
+
+
+def eden_data_roots() -> list[str]:
+    """Eden's user folders: <program folder>/user next to a running (portable) Eden, then %APPDATA%/eden."""
+    from .ryujinx import emulator_processes, ryujinx_exe_dirs
+    roots = []
+    if any(name == "Eden" for _, name in emulator_processes()):
+        roots += [os.path.join(d, "user") for d in ryujinx_exe_dirs()]
+    roots.append(os.path.expandvars(r"%APPDATA%\eden"))
+    return [r for r in dict.fromkeys(roots) if os.path.isdir(os.path.join(r, "nand"))]
+
+
 def find_save_files() -> list[str]:
-    """Ryujinx keeps each save in bis/user/save/<id>/0 (committed) and /1 (working copy)."""
+    """Ryujinx keeps each save in bis/user/save/<id>/0 (committed) and /1 (working copy); Eden in its nand folder."""
     roots = ryujinx_data_roots()
+    paths = [p for root in roots for p in glob.glob(os.path.join(root, "bis", "user", "save", "*", "0", "svdt"))]
+    # Eden: nand/user/save/0000000000000000/<user id>/<title id>/svdt (one copy)
+    paths += [p for root in eden_data_roots()
+              for p in glob.glob(os.path.join(root, "nand", "user", "save", "0000000000000000", "*", AOC_TITLE, "svdt"))]
     out = []
-    for root in roots:
-        for path in glob.glob(os.path.join(root, "bis", "user", "save", "*", "0", "svdt")):
-            try:
-                with open(path, "rb") as f:
-                    check_save(f.read())
-                out.append(path)
-            except (OSError, SaveFormatError):
-                continue
+    for path in paths:
+        try:
+            with open(path, "rb") as f:
+                check_save(f.read())
+            out.append(path)
+        except (OSError, SaveFormatError):
+            continue
     return out
 
 
@@ -59,6 +75,8 @@ def message_for(name: str) -> dict:
         return {"type": "quest_completed", "quest": name}
     if name in WEAPON_KINDS:
         return {"type": "weapon_obtained", "weapon": name}
+    if name.endswith((" (Normal)", " (Hard)", " (Very Hard)")):  # per-difficulty check (session.difficulty_ids)
+        return {"type": "difficulty_cleared", "name": name}
     return {"type": "challenge_cleared", "challenge": name}
 
 

@@ -10,6 +10,7 @@ from worlds.AutoWorld import WebWorld, World
 
 from . import items, locations, pacing, regions, rules
 from .data import (
+    FINAL_MISSION,
     ALL_CHARACTERS,
     BASE_CHARACTERS,
     DLC_CHARACTERS,
@@ -20,29 +21,34 @@ from .data import (
     GAME_NAME,
     MISSION_PARTY,
     MISSION_SUPPORT,
+    MISSION_NAMES,
     MISSIONS,
     ITEM_RUNES,
     RUNES,
     WEAPONS,
 )
-from .data_challenges import CALAMITY, CHALLENGE_BY_NAME, CHALLENGES, CHAMPIONS, RESCUES
+from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHALLENGE_QUEST_PREREQS, CHALLENGES, CHAMPIONS,
+                              DLC_STORY_MISSIONS)
 from .data_quests import QUEST_BY_NAME, QUESTS, UNUSED_QUESTS
 from .data_quest_unlocks import GAME_QUEST_PREREQS
-from .data_rewards import ALL_GROUPS, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical, reward_quest_count
+from .data_rewards import (ALL_GROUPS, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
+                           reward_quest_count)
 from .data_save import BASIC_WEAPONS
 from .options import (
-    AgeOfCalamityOptions, FirstMission, Goal, MissionOrder, MissionRewards, MissionUnlocks, SheikahRunes, SideContent, SideUnlocks, StoryParty, option_groups,
+    AgeOfCalamityOptions, ChallengeUnlockOrder, FirstMission, GameMode, QuestUnlockOrder, Goal, MissionOrder, MissionRewards, MissionUnlocks, SheikahRunes, SideContent, SideUnlocks, StoryParty, option_groups,
     WeaponCheckLogic, presets,
 )
 
-CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # (data_challenges: CALAMITY, RESCUES)
-WORLD_VERSION = "0.9.71"
+CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
+WORLD_VERSION = "0.9.74"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
 RANDOM_SIDE_START = 10
 RANDOM_SIDE_MIN_EACH = 3
 RANDOM_SIDE_STEP = (2, 4)
+CHALLENGES_ONLY_STEP = (3, 8)  # Challenges Only: each clear opens 3-8 more (user, 2026-11-02)
+CHALLENGES_ONLY_GOAL = 50  # Challenges Only with goal_challenges 0
 COMPLETIONS = rules.COMPLETIONS  # state counter of completion events (kept by collect/remove)
 
 
@@ -62,6 +68,10 @@ def _post_story_challenge(name: str, _seen: frozenset = frozenset()) -> bool:
     return any(names.get(r) in CHALLENGE_BY_NAME and names[r] not in _seen
                and _post_story_challenge(names[r], _seen | {name}) for r in needs)
 
+
+
+# EX Alerts that need a sighting (a monster the game picks when the alert appears): never checks (see generate_early).
+SIGHTING_ALERTS = frozenset(c.name for c in CHALLENGES if c.name.startswith("EX Alert:")) - {"EX Alert: Forgotten Temple"}
 
 class AgeOfCalamityWebWorld(WebWorld):
     game = GAME_NAME
@@ -100,7 +110,7 @@ class AgeOfCalamityWorld(World):
         "Weapons": {items.weapon_item(w.name) for w in WEAPONS},
         "Features": {f"Feature: {f}" for f in FEATURES},
         "Runes": {items.rune_item(r) for r in RUNES},
-        "Mission Unlocks": {items.unlock_item(m.name) for m in MISSIONS},
+        "Mission Unlocks": {items.unlock_item(m) for m in [*MISSION_NAMES, *DLC_STORY_MISSIONS]},
         "Quest Rewards": {g.item for g in REWARD_GROUPS},
         **{
             f"{family}s": {items.upgrade_item(family, c) for c in ALL_CHARACTERS}
@@ -138,6 +148,7 @@ class AgeOfCalamityWorld(World):
     post_goal_weapons: list[str]
     bonus_checks: dict[str, int]
     challenge_bonus_checks: dict[str, int] = {}
+    difficulty_levels: int = 0  # per-difficulty checks: Normal (1) .. Very Hard (3)
     boss_goal: bool
     featured_challenge: str | None
     mission_party: dict[str, tuple[str, ...]]
@@ -151,19 +162,43 @@ class AgeOfCalamityWorld(World):
     fairy_locked: bool
     goal_challenge_pool: list[str]
     reward_progression: set[str]
-    side_random: bool
+    side_random: bool  # challenges and/or quests open by completion count
+    challenge_random: bool = False
+    quest_random: bool = False
     completion_events: list[str]
     challenge_open_at: dict[str, int]
     quest_open_at: dict[str, int]
     _completion_set: frozenset[str] = frozenset()
+    ut_data: dict[str, Any] | None = None  # Universal Tracker: this slot's slot_data, to rebuild the same seed
+
+    # Universal Tracker regenerates the seed from slot_data alone (no YAML needed)
+    ut_can_gen_without_yaml = True
+
+    @staticmethod
+    def interpret_slot_data(slot_data: dict[str, Any]) -> dict[str, Any]:
+        return slot_data
+
+    def _restore_ut_options(self) -> None:
+        """Universal Tracker: the seed's own option values (slot_data "ut_options", 0.9.73+)."""
+        for name, value in (self.ut_data or {}).get("ut_options", {}).items():
+            current = getattr(self.options, name, None)
+            if current is not None:
+                setattr(self.options, name, type(current).from_any(value))
 
     def generate_early(self) -> None:
+        passthrough = getattr(self.multiworld, "re_gen_passthrough", None) or {}
+        self.ut_data = passthrough.get(self.game)
+        ut = self.ut_data
+        if ut:
+            self._restore_ut_options()
         options = self.options
         if options.side_content.value == SideContent.default:  # the toggles decide unless the old list form was set
             options.side_content.value = {k for k, on in (("Weapons", options.weapon_checks), ("Challenges", options.challenge_checks),
                                                           ("Quests", options.quest_checks)) if on}
         dlc = bool(options.include_dlc)
         self.characters = list(ALL_CHARACTERS if dlc else BASE_CHARACTERS)
+        self.game_mode = options.game_mode.value
+        self._apply_game_mode()
 
         pool = sorted(c for c in options.starting_character_pool.value if c in self.characters)
         count = options.starting_character_count.value
@@ -173,6 +208,8 @@ class AgeOfCalamityWorld(World):
             logging.warning("%s: only %d starting characters are available, not %d.", self.player_name, len(pool), count)
             count = len(pool)
         self.starting_characters = self.random.sample(pool, count)
+        if ut:
+            self.starting_characters = list(ut["starting_characters"])
 
         # Story slots keep the vanilla unlock structure; mission order decides which mission sits in each slot.
         slots = [m.name for m in MISSIONS]
@@ -202,18 +239,35 @@ class AgeOfCalamityWorld(World):
                                        if (any_mission or m.chapter <= 2) and m.name not in CHAINED_MISSIONS])
             i = assigned.index(pick)
             assigned[1], assigned[i] = assigned[i], assigned[1]
-        # Calamity Strikes traps the Champions until Water and Fire / Air and Lightning: those three keep their story
-        # slots (the rescues come right after it and open with its clear), so the trapped spell stays short.
-        for mission in CHAINED_MISSIONS:
-            i, j = assigned.index(mission), slots.index(mission)
-            assigned[i], assigned[j] = assigned[j], assigned[i]
+        # (0.9.66-0.9.71 pinned Calamity Strikes and the rescues to their story slots. The user saw no Champion trap
+        # once all four were received, so since 0.9.72 they are shuffled like any mission and have unlock items;
+        # Calamity Strikes still needs the four Champions.)
+        if options.final_mission_goal:  # the goal mission sits in the last story slot (and is never the first)
+            i = assigned.index(FINAL_MISSION)
+            assigned[i], assigned[-1] = assigned[-1], assigned[i]
+        if ut:
+            assigned = [ut["mission_slots"][s] for s in slots]
         self.slot_to_mission = dict(zip(slots, assigned))
         self.slot_prerequisites = {m.name: m.prerequisites for m in MISSIONS}
         self.mission_order = assigned
+        self.story_chain: list[str] = []
+        if self.game_mode == GameMode.option_story_only:
+            self._plan_story_chain(pick)
+        elif self.game_mode == GameMode.option_challenges_only:  # no story but the pre-cleared first mission
+            first = MISSIONS[0].name
+            self.slot_to_mission, self.slot_prerequisites, self.mission_order = {first: first}, {first: ()}, [first]
+            pick = first
         # With unlock items the story has no order: the player starts with a few unlocks for early missions.
         early = [m.name for m in MISSIONS[1:] if m.chapter <= 2 and m.name != pick]
         count = min(options.starting_mission_unlocks.value, len(early) + 1) if unlock_items else 0
+        if count == 1 and options.story_party == StoryParty.option_vanilla:
+            # Fixed parties leave a single starting mission (one check) to begin the fill from: about 4 in 5 such seeds
+            # failed to generate (option fuzz 2026-11-02). A second starting unlock always worked.
+            logging.warning("%s: story_party vanilla with one starting mission unlock: using 2.", self.player_name)
+            count = 2
         self.starting_unlocks = ([pick] + self.random.sample(early, count - 1)) if count else []
+        if ut:
+            self.starting_unlocks = list(ut.get("starting_unlocks", self.starting_unlocks))
 
         # Missions open before any check is reachable: the first two slots, or the first one plus the starting unlocks.
         playable_first = [self.mission_order[0], *self.starting_unlocks] if unlock_items else self.mission_order[:2]
@@ -238,11 +292,13 @@ class AgeOfCalamityWorld(World):
                     self.starting_characters.append(self.random.choice([c for c in pool if c in allowed] or allowed))
                 else:
                     self.party_needs[mission] = allowed
+        if ut:
+            self.party_needs = {m: list(c) for m, c in ut["mission_party_any"].items()}
 
         if options.sheikah_runes == SheikahRunes.option_shuffled:  # rune items are hinted for free from the start
             options.start_hints.value |= {items.rune_item(r) for r in ITEM_RUNES}
         side = options.side_content.value
-        boss_goal = options.goal == Goal.option_story_and_boss_rush
+        boss_goal = False  # the boss rush goal was removed (user, 2026-11-02); old seeds still finish in the client
         self.boss_goal = boss_goal
         self.characters_matter = bool(side) or vanilla_party or options.goal == Goal.option_story_and_all_characters
         self.characters_matter |= bool(self.party_needs)
@@ -255,8 +311,13 @@ class AgeOfCalamityWorld(World):
             keep = max(1, round(len(names) * density)) if names else 0
             return self.random.sample(names, keep) if keep < len(names) else list(names)
 
-        if side:
-            self.active_challenges = [c.name for c in CHALLENGES if dlc or not c.is_ex]
+        if self.game_mode == GameMode.option_story_only:
+            self.active_challenges = [c for c in self.story_chain if c in DLC_STORY_MISSIONS]  # the DLC story only
+        elif side:
+            # EX Alerts stay vanilla (playable, replayable, never checks): the game assigns each one a sighting (monster)
+            # when it appears, which the client can't set yet; one opened by hand crashed in its loading screen (user,
+            # 2026-11-02). "EX Alert: Forgotten Temple" is the Battle-Tested Guardian fight, a normal mission: it stays.
+            self.active_challenges = [c.name for c in CHALLENGES if (dlc or not c.is_ex) and c.name not in SIGHTING_ALERTS]
         else:
             self.active_challenges = list(BOSS_CHALLENGES) if boss_goal else []
         active = set(self.active_challenges)
@@ -274,26 +335,34 @@ class AgeOfCalamityWorld(World):
             return alive[name]
 
         self.active_quests = [q.name for q in QUESTS if side and (dlc or not q.is_ex) and is_alive(q.name)
-                              and q.name not in UNUSED_QUESTS]
+                              and q.name not in UNUSED_QUESTS and self.game_mode != GameMode.option_challenges_only]
         # Post-story content that only opens after a story-only goal holds no checks (user, 2026-10-28): reaching it
         # means the game is won and everything released. post_story_unlock below the goal keeps it in.
         o = options
         self.post_goal_side = (o.goal == Goal.option_story and not o.goal_challenges.value
                                and not o.goal_difficulty.value
-                               and o.post_story_unlock.value >= o.goal_story_missions.value)
+                               and o.post_story_unlock.value >= min(o.goal_story_missions.value, len(MISSIONS)))
         self.checked_challenges = set(pick([c for c in self.active_challenges
                                             if not (self.post_goal_side and _post_story_challenge(c))]))             if "Challenges" in side else set()
         # Challenges that count for goal_challenges: every challenge of the seed's content
-        self.goal_challenge_pool = list(self.active_challenges) if "Challenges" in side else []
+        # With include_dlc, Guardian of Remembrance's missions are story missions (goal, unlock items), not challenges
+        self.dlc_story = [c for c in DLC_STORY_MISSIONS if c in self.active_challenges
+                          and self.game_mode != GameMode.option_challenges_only]  # (there they are challenges)
+        self.goal_challenge_pool = [c for c in self.active_challenges if c not in self.dlc_story] if "Challenges" in side else []
+        self.checked_challenges |= set(self.dlc_story)  # story missions always hold their clear check
         if options.goal_challenges.value > len(self.goal_challenge_pool):
             logging.warning("%s: goal_challenges %d lowered to %d (challenges in the seed).", self.player_name,
                             options.goal_challenges.value, len(self.goal_challenge_pool))
+        if ut:
+            self.checked_challenges = set(ut["challenge_ids"])
         self.featured_challenge = None
         if options.featured_challenge and self.checked_challenges:
             choices = sorted(c for c in self.checked_challenges if not CHALLENGE_BY_NAME[c].is_ex)
             if choices:
                 self.featured_challenge = self.random.choice(choices)
                 options.priority_locations.value.add(locations.challenge_location(self.featured_challenge))
+        if ut:
+            self.featured_challenge = ut.get("featured_challenge")
         # Quest reward items: copies per group (capped at the quests the client enforces; 0 = vanilla).
         wanted = {canonical(k): v for k, v in self.options.quest_reward_items.value.items()}  # old names allowed
         quests_on = "Quests" in side  # quest-locking groups only make sense when quests are checks
@@ -309,6 +378,39 @@ class AgeOfCalamityWorld(World):
         if self.options.seal_slot_upgrades:
             extra["Progressive Seal Slot"] = self.options.seal_slot_upgrades.value
             self.reward_copies[canonical("Progressive Seal Removal")] = 0  # the same two seal-removal rewards
+        # Quests done from the start (no check, no item): the services the options open, plus the Smithy, the Training
+        # Camp and cooking unless an item holds them. Store rewards of those quests are given in full (pre_granted).
+        o = self.options
+        start_done = set(OPEN_SERVICE_QUESTS)
+        self.pre_granted: dict[str, int] = {}
+
+        def open_group(item: str, quests=None, grant: bool = False) -> None:
+            group = ALL_GROUPS[item]
+            start_done.update(quests if quests is not None else group.known)
+            self.reward_copies[item] = 0
+            extra.pop(item, None)
+            if grant:
+                self.pre_granted[item] = reward_quest_count(group)
+
+        if o.start_with_sheikah_sensor:
+            open_group("Progressive Sheikah Sensor", ("Needed: Researchers!",))
+        if o.start_with_trackers:
+            start_done.add("The Treasure Hunter's Technique")
+            for g in ALL_GROUPS.values():
+                if g.kind == "store" and {"The Treasure Detector", "A Most Peculiar Korok"} & set(g.known):
+                    open_group(g.item, grant=True)
+        if o.open_stables:
+            open_group("Progressive Stable Unlock")
+        shop_quests = [q for q in ALL_GROUPS["Progressive Shop Unlock"].known if q != DYE_SHOP_QUEST]
+        if o.open_shops:
+            open_group("Progressive Shop Unlock", shop_quests)
+            open_group("Feature: Shops", shop_quests)
+        if o.open_dye_shop:
+            start_done.add(DYE_SHOP_QUEST)
+        self.reward_copies["Progressive Region Hope"] = 0  # Hope quests complete by map %, nothing to buy or unlock
+        if self.game_mode and not self.reward_copies.get("Progressive Recipe"):
+            open_group("Progressive Recipe", grant=True)  # both modes: recipe items, else every recipe from the start
+                                                          # (no quests on the map to earn them)
         self.group_copies = {**self.reward_copies, **extra}
         self.fairy_locked = "Fairy Fountains" in features
         # Quests whose service follows the quest state (shops, stables, the Smithy): buying is the check, the service
@@ -318,9 +420,17 @@ class AgeOfCalamityWorld(World):
         # Quests locked until their item arrives (reward address unknown): they stay checks, gated by the item.
         self.unlock_quests = {q: g.item for g in ALL_GROUPS.values() if g.kind == "unlock" and self.group_copies.get(g.item)
                               for q in g.known}
-        no_check = set(OPEN_SERVICE_QUESTS) - set(self.item_quests)  # open from the start: nothing to buy
+        self.open_quests = start_done - set(self.item_quests) - set(self.unlock_quests)
+        # challenges opened by quests in the game (Trial of the Ancients, fairy fountains): kept when those quests exist
+        self.challenge_quests = {c: qs for c, qs in CHALLENGE_QUEST_PREREQS.items()
+                                 if c in self.active_challenges and all(q in self.active_quests for q in qs)}
+        no_check = set(self.open_quests)  # open from the start: nothing to buy
+        hope = {q for q in self.active_quests if q.startswith("The Hope of ")}
+        no_check |= {"The Hope of All Hyrule"} | (set() if o.region_hope_checks else hope)
         self.checked_quests = set(pick([q for q in self.active_quests if q not in no_check
                                         and not (self.post_goal_side and QUEST_BY_NAME[q].gate == "HOPE")]))             if "Quests" in side else set()
+        if ut:
+            self.checked_quests = set(ut["quest_ids"])
         # Their items gate logic only through checked quests that need one of those quests first (at any depth).
         self.reward_progression = set()
 
@@ -343,19 +453,85 @@ class AgeOfCalamityWorld(World):
             all_koroks = [k for k in locations.KOROKS if k[1] == "mission" or k[0] in active]
             names = {locations.korok_name(s, i): (s, k, i) for s, k, i in all_koroks}
             chosen = set(pick(list(names)))
+            if ut:
+                chosen = set(ut["korok_ids"])
             self.checked_koroks = [v for n, v in names.items() if n in chosen]
         self.active_weapons = [w.name for w in WEAPONS if dlc or not w.dlc]
         # A hero's basic weapon is no check: a new game already hands several out, and the client gives the rest.
         self.checked_weapons = [w for w in self.active_weapons if w not in BASIC_WEAPONS] if "Weapons" in side else []
-        self.side_random = options.side_unlocks == SideUnlocks.option_shuffled
+        shuffled = options.side_unlocks == SideUnlocks.option_shuffled  # (old option: game_rules = both vanilla)
+        self.challenge_random = (shuffled and options.challenge_unlock_order == ChallengeUnlockOrder.option_randomized
+                                 or self.game_mode == GameMode.option_challenges_only)
+        self.quest_random = shuffled and options.quest_unlock_order == QuestUnlockOrder.option_randomized
+        self.side_random = self.challenge_random or self.quest_random
         self.completion_events = ([regions.cleared_event(m) for m in self.mission_order]
                                   + [regions.challenge_event(c) for c in self.active_challenges]
                                   + [regions.quest_event(q) for q in self.active_quests])
         self._completion_set = frozenset(self.completion_events)
+        # per-difficulty checks (none with a difficulty lock: one clear on the locked difficulty sends everything)
+        self.difficulty_levels = 0 if options.difficulty_lock else options.difficulty_checks.value
         self.challenge_open_at, self.quest_open_at = self._plan_random_side() if self.side_random else ({}, {})
+        if ut:
+            self.challenge_open_at, self.quest_open_at = dict(ut["challenge_open_at"]), dict(ut["quest_open_at"])
         self._plan_side_gates()
         self.post_goal_weapons = self._post_goal_weapons()
         self.checked_weapons = [w for w in self.checked_weapons if w not in self.post_goal_weapons]
+        if ut:
+            self.checked_weapons = [w for w in self.active_weapons if w in ut["weapon_ids"]]
+
+    def _apply_game_mode(self) -> None:
+        """Story Only / Challenges Only (user, 2026-11-02) override the options they replace."""
+        o = self.options
+        if self.game_mode:  # both modes: every service open from the start (user, 2026-11-02)
+            for name in ("open_shops", "open_stables", "open_dye_shop", "start_with_sheikah_sensor"):
+                getattr(o, name).value = 1
+            o.weapon_fusion.value = 0
+            o.locked_features.value = set()
+        if self.game_mode == GameMode.option_story_only:
+            o.side_content.value = set()  # every check on story missions (bonus checks), DLC story included
+            o.mission_unlocks.value = MissionUnlocks.option_story_order  # each clear opens the next (story_chain)
+            o.goal.value = Goal.option_story
+            o.goal_challenges.value = 0
+            o.goal_side_missions.value = 0
+            o.side_missions_per_unlock.value = 0
+        elif self.game_mode == GameMode.option_challenges_only:
+            o.side_content.value = {"Challenges"}
+            o.mission_unlocks.value = MissionUnlocks.option_story_order
+            o.final_mission_goal.value = 0
+            o.goal.value = Goal.option_story
+            o.goal_side_missions.value = 0
+            o.side_missions_per_unlock.value = 0
+            if not o.goal_challenges.value:
+                o.goal_challenges.value = CHALLENGES_ONLY_GOAL
+            o.side_unlocks.value = SideUnlocks.option_shuffled
+            if o.sheikah_runes == SheikahRunes.option_vanilla:  # the vanilla runes come from story missions
+                o.sheikah_runes.value = SheikahRunes.option_shuffled
+
+    def _plan_story_chain(self, first: str) -> None:
+        """Story Only: a random chain of every story mission (the DLC story too with include_dlc); clearing one opens
+        the next. The Battle of Hyrule Field is first (pre-cleared), `first` second; with final_mission_goal The Future
+        of Hyrule is the goal_story_missions-th."""
+        o = self.options
+        rest = [m.name for m in MISSIONS[1:] if m.name != first]
+        if o.include_dlc:
+            rest += list(DLC_STORY_MISSIONS)
+        self.random.shuffle(rest)
+        chain = [MISSIONS[0].name, first] + rest
+        if o.final_mission_goal and FINAL_MISSION in chain:
+            chain.remove(FINAL_MISSION)
+            chain.insert(max(2, min(o.goal_story_missions.value, len(chain) + 1) - 1), FINAL_MISSION)
+        if self.ut_data and self.ut_data.get("story_chain"):
+            chain = list(self.ut_data["story_chain"])
+        self.story_chain = chain
+        base = [m for m in chain if m in MISSION_NAMES]
+        self.mission_order = base
+        self.slot_to_mission = {m: m for m in base}
+        self.slot_prerequisites = {m: ((chain[chain.index(m) - 1],) if chain.index(m) else ()) for m in base}
+
+    def chain_before(self, name: str) -> str | None:
+        """Story Only: the mission whose clear opens this one."""
+        i = self.story_chain.index(name) if name in self.story_chain else 0
+        return self.story_chain[i - 1] if i else None
 
     def _post_goal_weapons(self) -> list[str]:
         """Weapon drops the logic only opens after the whole story (weapon_check_logic after_story, unverified timing)
@@ -375,10 +551,16 @@ class AgeOfCalamityWorld(World):
         their own rules."""
         # post-story content joins the random openings unless post_story_unlock is 20 (vanilla: after the whole story)
         vanilla_post = self.options.post_story_unlock.value >= 20
-        challenges = [c for c in self.active_challenges if not (self.boss_goal and c in BOSS_CHALLENGES)
-                      and not (vanilla_post and _post_story_challenge(c))]
-        quests = [q for q in self.active_quests if (q not in OPEN_SERVICE_QUESTS or q in self.item_quests)
-                  and not (vanilla_post and QUEST_BY_NAME[q].gate == "HOPE")]
+        only = self.game_mode == GameMode.option_challenges_only  # every challenge joins (no story to wait for)
+        challenges = [c for c in self.active_challenges if only or not (self.boss_goal and c in BOSS_CHALLENGES)
+                      and not (vanilla_post and _post_story_challenge(c) and not only) and c not in self.challenge_quests
+                      and c not in self.dlc_story  # story missions: unlock items or the game's chain, not side counts
+                      and self.challenge_random]
+        # Expansion Pass quests carry a conservative after-the-story gate in our data, but all of them can be handed in
+        # whenever they're open (77 forced open, 2026-11-02): they join the random order (user: DLC pops up anytime)
+        quests = [q for q in self.active_quests if q not in self.open_quests and not q.startswith("The Hope of ")
+                  and not (vanilla_post and QUEST_BY_NAME[q].gate == "HOPE" and not q.startswith("EX "))
+                  and self.quest_random]
         self.random.shuffle(challenges)
         self.random.shuffle(quests)
         first = challenges[:RANDOM_SIDE_MIN_EACH] + quests[:RANDOM_SIDE_MIN_EACH]
@@ -390,7 +572,7 @@ class AgeOfCalamityWorld(World):
         done = 0
         while len(thresholds) < len(entries):
             done += 1
-            thresholds += [done] * self.random.randint(*RANDOM_SIDE_STEP)
+            thresholds += [done] * self.random.randint(*(CHALLENGES_ONLY_STEP if only else RANDOM_SIDE_STEP))
         opens: dict[str, dict[str, int]] = {"c": {}, "q": {}}
         for (kind, name), at in zip(entries, thresholds):
             opens[kind][name] = at
@@ -427,7 +609,12 @@ class AgeOfCalamityWorld(World):
                             if self.challenge_open_at.get(c, 0) <= done
                             and all(r in cleared_events(cleared, full) for r in rules.challenge_requirements(self, c)
                                     if not r.startswith("Character: "))}
-                    more |= {regions.quest_event(q) for q in quests if self.quest_open_at.get(q, 0) <= done}
+                    more |= {regions.quest_event(q) for q in quests if q in self.quest_open_at
+                             and self.quest_open_at[q] <= done}
+                    more |= {regions.quest_event(name) for name, q in quests.items() if name not in self.quest_open_at
+                             and all(regions.quest_event(p) in got for p in q.quest_prereqs)
+                             and all(regions.challenge_event(c) in got for c in q.challenge_prereqs)
+                             and rules.quest_gate_open(q.gate, cleared_events(cleared, full))}  # vanilla quests
                     if more <= got:
                         return got
                     got |= more
@@ -499,6 +686,10 @@ class AgeOfCalamityWorld(World):
         rules.set_all_rules(self)
         self.post_goal_excluded = pacing.exclude_post_goal(self)
         rules.apply_steady_rewards(self)
+        for loc in self.multiworld.get_locations(self.player):  # a harder clear needs what the clear itself needs
+            base = getattr(loc, "difficulty_of", None)
+            if base:
+                loc.access_rule = self.get_location(base).access_rule
 
     def pre_fill(self) -> None:
         pacing.ensure_room(self)
@@ -560,6 +751,27 @@ class AgeOfCalamityWorld(World):
             self._reward_shuffle = dict(zip(records, sources))
         return {"mode": mode, "map": {str(k): v for k, v in self._reward_shuffle.items()}}
 
+    def _dlc_location_ids(self) -> list[int]:
+        """This seed's checks in Expansion Pass content (EX challenges, quests, DLC weapons, Koroks in EX challenges,
+        and their bonus / per-difficulty checks): the client sends them itself when the DLC isn't installed."""
+        import re
+        ex = {c.name for c in CHALLENGES if c.is_ex} | {q.name for q in QUESTS if q.is_ex}
+        ex |= {w.name for w in WEAPONS if w.dlc}
+        out = []
+        for loc in self.multiworld.get_locations(self.player):
+            if loc.address is None:
+                continue
+            name = re.sub(r" \((Bonus \d+|Normal|Hard|Very Hard)\)$", "", loc.name.partition(": ")[2])
+            name = re.sub(r" #\d+$", "", name) if loc.name.startswith("Korok: ") else name
+            if name in ex:
+                out.append(loc.address)
+        return sorted(out)
+
+    def _own_option_names(self) -> list[str]:
+        from Options import PerGameCommonOptions
+        common = set(PerGameCommonOptions.type_hints)
+        return [n for n in self.options_dataclass.type_hints if n not in common]
+
     def fill_slot_data(self) -> Mapping[str, Any]:
         ids = locations.LOCATION_NAME_TO_ID
         option_names = [
@@ -573,11 +785,18 @@ class AgeOfCalamityWorld(World):
         data["upgrade_copies"] = dict(getattr(self, "upgrade_copies", {}))
         data["upgrade_copies"].update({name: int(getattr(self.options, option).value) for name, option in GLOBAL_UPGRADES.items()})
         data["quest_reward_items"] = {k: v for k, v in getattr(self, "group_copies", {}).items() if v}
+        data["open_quests"] = sorted(getattr(self, "open_quests", ()))
+        data["pre_granted"] = dict(getattr(self, "pre_granted", {}))
+        data["hero_level_cap"] = int(bool(self.options.hero_level_cap))
+        data["goal_banner"] = int(bool(self.options.goal_banner))
         data["mission_rewards"] = self.mission_reward_plan()
         return {
             "world_version": WORLD_VERSION,
             "pace": pace,
             "starting_characters": list(self.starting_characters),
+            "starting_unlocks": list(self.starting_unlocks),
+            # every option of this world, so Universal Tracker can rebuild the seed without the YAML
+            "ut_options": self.options.as_dict(*self._own_option_names()),
             "mission_ids": {m: ids[locations.mission_location(m)] for m in self.mission_order},
             # extra checks sent together with a story clear (items outnumbered the checks)
             "mission_bonus_ids": {m: [ids[locations.bonus_location(m, k)] for k in range(1, n + 1)]
@@ -592,7 +811,10 @@ class AgeOfCalamityWorld(World):
             # free parties: a mission whose support heroes can't be picked needs one of these heroes (any)
             "mission_party_any": {m: list(c) for m, c in self.party_needs.items()},
             # 0.9.65+: missions opened by another mission's clear instead of an unlock item (the rescues)
-            "opened_by_clear": {m: CALAMITY for m in RESCUES} if self.options.mission_unlocks else {},
+            "opened_by_clear": {},  # (0.9.66-0.9.71: the rescues opened with Calamity Strikes' clear)
+            "calamity_unlock_item": 1,
+            "final_goal": int(bool(self.options.final_mission_goal)),
+            "challenge_quests": {c: list(q) for c, q in getattr(self, "challenge_quests", {}).items()},  # Calamity Strikes has an unlock item (mission_unlocks: items) since 0.9.72
             # 0.9.66+: Calamity Strikes opens once all four Champions are yours (no unlock item)
             "opened_by_heroes": {CALAMITY: list(CHAMPIONS)},
             "all_characters": list(self.characters),
@@ -601,6 +823,9 @@ class AgeOfCalamityWorld(World):
             "goal_story_missions": self.options.goal_story_missions.value,
             "goal_challenges": min(self.options.goal_challenges.value, len(self.goal_challenge_pool)),
             "goal_challenge_pool": list(self.goal_challenge_pool),
+            "dlc_story_missions": list(self.dlc_story),
+            "game_mode": self.game_mode,
+            "story_chain": list(self.story_chain),
             "post_story_unlock": self.options.post_story_unlock.value,
             # side_unlocks random: challenge/quest -> completions it opens after; what counts as a completion
             "side_unlocks": self.options.side_unlocks.value,
@@ -623,5 +848,10 @@ class AgeOfCalamityWorld(World):
             "challenge_ids": {n: ids[locations.challenge_location(n)] for n in sorted(self.checked_challenges)},
             "quest_ids": {n: ids[locations.quest_location(n)] for n in sorted(self.checked_quests)},
             "korok_ids": {locations.korok_name(s, i): ids[locations.korok_name(s, i)] for s, _, i in self.checked_koroks},
+            # "<mission or challenge> (<difficulty>)" -> id: sent when the game shows it cleared on that difficulty+
+            "difficulty_ids": {loc.name.partition(": ")[2]: loc.address for loc in self.multiworld.get_locations(self.player)
+                               if getattr(loc, "difficulty_of", None)},
+            "difficulty_lock": self.options.difficulty_lock.value,
+            "dlc_location_ids": self._dlc_location_ids() if self.options.include_dlc else [],
             **data,
         }

@@ -39,7 +39,11 @@ LOCATION_KINDS = {
     "challenge": "challenge_ids",
     "quest": "quest_ids",
     "korok": "korok_ids",
+    "difficulty": "difficulty_ids",  # "<mission or challenge> (<difficulty>)"
 }
+
+
+DIFFICULTY_LEVEL = {"Normal": 1, "Hard": 2, "Very Hard": 3}  # locations.DIFFICULTY_NAMES -> difficulty slot
 
 
 NOTICE_MAX = 44  # characters; the game's message boxes are small
@@ -127,6 +131,9 @@ class Session:
         self.party_any: dict[str, list[str]] = {k: list(v) for k, v in slot_data.get("mission_party_any", {}).items()}
         self.opened_by_clear: dict[str, str] = dict(slot_data.get("opened_by_clear", {}))
         self.opened_by_heroes: dict[str, list[str]] = {k: list(v) for k, v in slot_data.get("opened_by_heroes", {}).items()}
+        self.calamity_unlock_item = bool(slot_data.get("calamity_unlock_item", 0))
+        self.final_goal = bool(slot_data.get("final_goal", 0))  # The Future of Hyrule opens by counts and is the goal
+        self.challenge_quests: dict[str, list[str]] = {k: list(v) for k, v in slot_data.get("challenge_quests", {}).items()}
         # include_dlc off: the Expansion Pass stays vanilla (its challenges and heroes are never touched).
         self.include_dlc = bool(slot_data.get("include_dlc", 1))
         self.goal = slot_data.get("goal", 0)
@@ -141,17 +148,31 @@ class Session:
         self.featured_challenge = slot_data.get("featured_challenge")
         self.goal_side_missions = int(slot_data.get("goal_side_missions", 0))
         self.goal_story_missions = int(slot_data.get("goal_story_missions", 20))
+        # include_dlc (0.9.74+): Guardian of Remembrance's missions count as story missions for the goal; they are
+        # challenge records in the game, so their clears arrive as challenge clears
+        self.dlc_story: list[str] = list(slot_data.get("dlc_story_missions", []))
+        # 0.9.74 game modes: 0 standard, 1 Story Only (story_chain: each clear opens the next), 2 Challenges Only
+        self.game_mode = int(slot_data.get("game_mode", 0))
+        self.story_chain: list[str] = list(slot_data.get("story_chain", []))
         self.goal_challenges = int(slot_data.get("goal_challenges", 0))
         self.post_story_unlock = int(slot_data.get("post_story_unlock", 20))
         self.post_story_quests: list[str] = list(slot_data.get("post_story_quests", []))
         self.goal_challenge_pool: set[str] = set(slot_data.get("goal_challenge_pool", []))
+        self.dlc_location_ids: list[int] = list(slot_data.get("dlc_location_ids", []))
         # side_unlocks random (0.9.53+): challenge/quest -> completions (story clears, challenges, quests) it opens after
         self.challenge_open_at: dict[str, int] = dict(slot_data.get("challenge_open_at", {}))
         self.quest_open_at: dict[str, int] = dict(slot_data.get("quest_open_at", {}))
         self.side_random = int(slot_data.get("side_unlocks", 1)) == 0 and bool(self.challenge_open_at or self.quest_open_at)
         self.completion_names: set[str] = set(slot_data.get("completion_challenges", [])) |             set(slot_data.get("completion_quests", []))
         self.game_done: set[str] = set()  # missions, challenges and quests the game shows done (client, live)
+        # quests whose check the server already has (a release/collect, or your own earlier clear): nothing left to win
+        # there, so the client marks them done in game and whatever they open opens (user, 2026-11-02)
+        self.collected_quests: set[str] = set()
         self.cleared_any: set[str] = set()  # every mission/challenge the game shows cleared (client, any difficulty)
+        self.difficulty_lock = int(slot_data.get("difficulty_lock", 0))  # 1 Normal .. 3 Very Hard: easier clears don't count
+        # per-difficulty checks in this seed: highest difficulty slot (1 Normal .. 3 Very Hard), 0 none
+        self.difficulty_levels = max((DIFFICULTY_LEVEL[n.rpartition(" (")[2][:-1]] for n in self.ids["difficulty"]),
+                                     default=0)
         self.goal_difficulty = int(slot_data.get("goal_difficulty", 0))  # 0 any, 1 Easy .. 4 Very Hard, 5 Apocalyptic
         self.difficulty_cleared: set[str] = set()  # missions/challenges cleared on goal_difficulty or higher (client)
         self.final_mission: str = slot_data["final_mission"]
@@ -181,6 +202,13 @@ class Session:
         from ..data_rewards import canonical
         self.reward_copies: dict[str, int] = {canonical(k): int(v)  # rooms from before the rename use old names
                                               for k, v in slot_data.get("quest_reward_items", {}).items()}
+        from ..data_rewards import OPEN_SERVICE_QUESTS
+        # Quests done from the start (no check) and store rewards given in full at the start (older rooms: the
+        # client's fixed list).
+        self.open_quests: set[str] = set(slot_data.get("open_quests", OPEN_SERVICE_QUESTS))
+        self.pre_granted: dict[str, int] = {k: int(v) for k, v in slot_data.get("pre_granted", {}).items()}
+        self.hero_level_cap = bool(slot_data.get("hero_level_cap", 0))
+        self.goal_banner = bool(slot_data.get("goal_banner", 1))  # older seeds: on
 
         self.starting_characters: list[str] = list(slot_data["starting_characters"])
         self.unlocked_characters: set[str] = set(self.starting_characters)
@@ -231,6 +259,18 @@ class Session:
             # Anything else is filler; the game side decides what it grants.
         return changed
 
+    def drop_dlc(self) -> list[int]:
+        """The seed has the Expansion Pass but the game doesn't: leave EX content alone, take EX challenges out of the
+        goal (lowering goal_challenges to what's left), and return the DLC checks to send so nothing stays stuck behind
+        content that can't be played."""
+        from ..data_challenges import CHALLENGE_BY_NAME
+        self.include_dlc = False
+        self.dlc_story = []  # the goal counts the base story only
+        self.goal_challenge_pool = {c for c in self.goal_challenge_pool
+                                    if c not in CHALLENGE_BY_NAME or not CHALLENGE_BY_NAME[c].is_ex}
+        self.goal_challenges = min(self.goal_challenges, len(self.goal_challenge_pool))
+        return list(self.dlc_location_ids)
+
     def apply_checked_location_ids(self, ids: set[int]) -> bool:
         """Mark locations the server already knows about (e.g. after a reconnect or a release)."""
         changed = False
@@ -238,6 +278,9 @@ class Session:
             found = self._by_id.get(location_id)
             if found and found[0] in ("challenge", "quest"):
                 self.side_done.add(f"{found[0]}:{found[1]}")
+                if found[0] == "quest" and found[1] not in self.collected_quests:
+                    self.collected_quests.add(found[1])
+                    changed = True
                 if found[0] == "challenge":
                     self.challenges_done.add(found[1])
             if found and found[1] not in self.done[found[0]]:
@@ -261,6 +304,10 @@ class Session:
         """Extra checks sent together with this story or challenge clear."""
         return set(self.mission_bonus_ids.get(mission, ()))
 
+    def on_difficulty_cleared(self, name: str) -> int | None:
+        """"<mission or challenge> (<difficulty>)": cleared on that difficulty or a harder one."""
+        return self._report("difficulty", name)
+
     def on_weapon_obtained(self, weapon: str) -> int | None:
         return self._report("weapon", weapon)
 
@@ -282,15 +329,18 @@ class Session:
         slot = self._slot_of.get(mission)
         if slot is None:
             return False
+        if self.final_goal and mission == self.final_mission:
+            return (self._goal_counts_met(exclude_final=True)
+                    and all(c in self.unlocked_characters for c in self.party_required.get(mission, [])))
         party_any = self.party_any.get(mission)  # free parties: one hero besides its support heroes
         if party_any and not any(c in self.unlocked_characters for c in party_any):
             return False
         if mission in self.opened_by_clear:  # the rescues: open with Calamity Strikes' clear
             return self.opened_by_clear[mission] in self.cleared_missions
-        if mission in self.opened_by_heroes:  # Calamity Strikes: all four Champions yours (no unlock item)
+        if mission in self.opened_by_heroes:  # Calamity Strikes: all four Champions yours
             if not all(c in self.unlocked_characters for c in self.opened_by_heroes[mission]):
                 return False
-            if self.unlock_items:
+            if self.unlock_items and not self.calamity_unlock_item:  # 0.9.66-0.9.71 rooms: no unlock item
                 return True
         if self.unlock_items:  # opened by its unlock item alone; the first slot is open from the start
             if slot != next(iter(self.mission_slots)) and mission not in self.mission_unlocks:
@@ -300,7 +350,22 @@ class Session:
             return False
         if any(c not in self.unlocked_characters for c in self.party_required.get(mission, [])):
             return False
-        return all(self.mission_slots[p] in self.cleared_missions for p in self.slot_prerequisites[slot])
+        return all(self._prerequisite_cleared(p) for p in self.slot_prerequisites[slot])
+
+    def _prerequisite_cleared(self, slot: str) -> bool:
+        """A story slot's clear, or (Story Only) a DLC story mission's, which sits in the chain like a slot."""
+        if slot in self.mission_slots:
+            return self.mission_slots[slot] in self.cleared_missions
+        if not self.include_dlc and slot in self.story_chain:  # DLC failsafe (no DLC in the game): skip it in the chain
+            i = self.story_chain.index(slot)
+            return not i or self._prerequisite_cleared(self.story_chain[i - 1])
+        return slot in self.challenges_done or slot in self.game_done
+
+    def dlc_story_open(self, name: str) -> bool:
+        """Story Only: a DLC story mission opens with the clear before it in the chain."""
+        i = self.story_chain.index(name) if name in self.story_chain else 0
+        return bool(i) and (self._prerequisite_cleared(self.story_chain[i - 1])
+                            or self.story_chain[i - 1] in self.cleared_missions)
 
     def combo_levels(self) -> dict[int, int]:
         """Upgrade category -> combo level the hero has earned from received Combo Upgrade items (every category of a
@@ -339,7 +404,11 @@ class Session:
         values: dict[int, int] = {}
         copies = int(self.upgrade_copies.get("Enhanced Ability", 1))
         if copies:
-            for hero, categories in ABILITY_CATEGORIES.items():
+            heroes = {hero: list(categories) for hero, categories in ABILITY_CATEGORIES.items()}
+            if self.include_dlc:  # the Expansion Pass abilities follow the same items (until 0.9.74 they stayed vanilla)
+                for hero, categories in ABILITY_CATEGORIES_DLC.items():
+                    heroes.setdefault(hero, []).extend(categories)
+            for hero, categories in heroes.items():
                 if not self.include_dlc and hero in DLC_CHARACTERS:
                     continue
                 got = min(self.upgrades.get(f"Enhanced Ability: {hero}", 0), copies)
@@ -371,13 +440,45 @@ class Session:
     def reward_writes(self) -> dict[tuple[int, int], int]:
         """(block, offset) -> value for stored quest rewards that follow received items (each copy worth its share of
         its group's quests, in order). Groups the seed has no copies of stay vanilla."""
-        from ..data_rewards import ALL_GROUPS, given_quests, reward_writes
+        from ..data_rewards import ALL_GROUPS, SHARED_COUNTERS, given_quests, reward_writes
+
         values: dict[tuple[int, int], int] = {}
+
+        def merge(new: dict[tuple[int, int], int]) -> None:  # two groups on one byte (levels): the higher value
+            for key, value in new.items():
+                values[key] = max(values.get(key, 0), value)
+
+        active = set()
         for item, copies in self.reward_copies.items():
             group = ALL_GROUPS.get(item)
             if group and group.kind == "store" and copies:
-                values.update(reward_writes(group, given_quests(group, self.received_count(item), copies)))
+                active.add(item)
+                merge(reward_writes(group, given_quests(group, self.received_count(item), copies)))
+        for item, count in self.pre_granted.items():  # given in full from the start (options)
+            if item in ALL_GROUPS:
+                active.add(item)
+                merge(reward_writes(ALL_GROUPS[item], count))
+        # A quest of a group the seed leaves vanilla keeps the reward the game gave for it, even on a byte an item
+        # group forces (Sweeten the Research's sensor levels share bytes with Feed the Research).
+        done = self.game_done | self.done["quest"]
+        for item, group in ALL_GROUPS.items():
+            if group.kind != "store" or item in active:
+                continue
+            for i, quest in enumerate(group.known):
+                if quest in done:
+                    merge({(b, o): v for b, o, v in group.writes[i] if (b, o) in values})
+        held = {q for item in active for q in ALL_GROUPS[item].known}
+        for key, quests in SHARED_COUNTERS.items():  # a counter of every quest of its type: add the free ones
+            if key in values:
+                values[key] += sum(1 for q in quests if q in done and q not in held)
         return values
+
+    def store_quests(self) -> set[str]:
+        """Quests whose reward the client already enforces from items (store groups in the seed): their bytes follow
+        the items, so per-quest effects (data_save.QUEST_EFFECTS) must not be written for them too."""
+        from ..data_rewards import ALL_GROUPS
+        active = {item for item, copies in self.reward_copies.items() if copies} | set(self.pre_granted)
+        return {q for item in active if (g := ALL_GROUPS.get(item)) and g.kind == "store" for q in g.known}
 
     def unlocked_by(self, item: str) -> list[str]:
         """Quests a quest reward group item stands for so far (its first copies, in vanilla order)."""
@@ -402,15 +503,19 @@ class Session:
         - "unlock" groups: -1 (not available unless already done) until the item share is in, then 2 (available; the
           player completes it normally and the game gives its reward).
         Groups without copies in the seed are left alone."""
-        from ..data_rewards import ALL_GROUPS, OPEN_SERVICE_QUESTS, given_quests
-        states = {q: 3 for q in OPEN_SERVICE_QUESTS}  # Weapon Fusion (below) overrides the Smithy when in the seed
+        from ..data_rewards import ALL_GROUPS, given_quests
+        from ..data_save import QUEST_EFFECTS
+        states = {q: 3 for q in self.open_quests}  # Weapon Fusion (below) overrides the Smithy when in the seed
         bought = self.done["quest"]
         if self.side_random:  # open (available) by completion count, else held back unless already done
             done = self.completions
             states.update({q: 2 if done >= at else -1 for q, at in self.quest_open_at.items()
-                           if q not in OPEN_SERVICE_QUESTS})
+                           if q not in self.open_quests})
         elif self.post_story_open:  # post-story quests opened early (available; groups below may still hold them)
-            states.update({q: 2 for q in self.post_story_quests if q not in OPEN_SERVICE_QUESTS})
+            states.update({q: 2 for q in self.post_story_quests if q not in self.open_quests})
+        # checks already collected: done (reward-group quests below keep following their items; Hope quests follow the
+        # map %)
+        states.update({q: 3 for q in self.collected_quests if not q.startswith("The Hope of ")})
         for item, copies in self.reward_copies.items():
             group = ALL_GROUPS.get(item)
             if not group or not copies or group.kind not in ("quest", "unlock"):
@@ -418,15 +523,24 @@ class Session:
             given = given_quests(group, self.received_count(item), copies)
             for i, q in enumerate(group.known):
                 if group.kind == "unlock":
-                    states[q] = 2 if i < given and self.side_open("quest", q) else -1
+                    if i < given and q in self.collected_quests and q in QUEST_EFFECTS:
+                        states[q] = 3  # its check is gone and the client sets its reward: done for free
+                    else:
+                        states[q] = 2 if i < given and self.side_open("quest", q) else -1
                 elif q not in self.ids.get("quest", {}):
                     states[q] = 3 if i < given else 1  # no check for it in this seed (0.9.25-0.9.32): item alone
                 elif q in bought:
                     states[q] = 3 if i < given else 1
-                elif self.side_random:
+                elif q in self.quest_open_at:  # random quest unlocks
                     states[q] = 2 if self.side_open("quest", q) else -1
                 else:
                     states.pop(q, None)  # (the Smithy with Weapon Fusion: buyable like any shop quest)
+        if self.game_mode == 2:  # Challenges Only: map quests don't appear (services stay open)
+            from ..data_save import QUEST_STATE_IDS
+            for q in QUEST_STATE_IDS:
+                states.setdefault(q, -1)
+        if not self.include_dlc:  # no Expansion Pass in the game (drop_dlc): its quests are never touched
+            states = {q: v for q, v in states.items() if not q.startswith("EX ")}
         return states
 
     def selection_checks(self, sel_id: int, kind: int) -> tuple[str, list[int]] | None:
@@ -438,6 +552,7 @@ class Session:
         elif kind in (2, 3):  # 2 story mission, 3 challenge (incl. Divine Beast battles) [read live]
             name = next((n for n, recs in MISSION_RECORD_IDS.items() if sel_id in recs), None)
             ids = [i for kind_ in ("mission", "challenge") for n, i in self.ids[kind_].items() if n == name]
+            ids += [i for n, i in self.ids["difficulty"].items() if n.rpartition(" (")[0] == name]
         else:
             return None
         if name is None:
@@ -480,14 +595,17 @@ class Session:
         done = self.completions
         held = {q for q, state in self.quest_states().items() if state == -1}  # still waiting for a reward item
         quests = {q for q, at in self.quest_open_at.items() if done >= at and q not in held}
-        return quests | {c for c, at in self.challenge_open_at.items() if done >= at and all(
-            h in self.unlocked_characters for h in CHALLENGE_BY_NAME[c].required_characters)}
+        return quests | {c for c, at in self.challenge_open_at.items() if done >= at and (self.story_party_free or all(
+            h in self.unlocked_characters for h in CHALLENGE_BY_NAME[c].required_characters))}
 
     @property
     def post_story_open(self) -> bool:
-        """post_story_unlock below 20 and that many story missions cleared."""
-        return self.post_story_unlock < 20 and \
-            sum(m in self.cleared_missions for m in self.mission_ids) >= self.post_story_unlock
+        """post_story_unlock below 20 and that many story missions cleared; with final_goal also every story mission
+        but The Future of Hyrule (the goal itself) cleared, as in logic."""
+        missions = [m for m in self.mission_ids if not (self.final_goal and m == self.final_mission)]
+        if self.post_story_unlock >= 20 and not self.final_goal:
+            return False
+        return sum(m in self.cleared_missions for m in missions) >= min(self.post_story_unlock, len(missions))
 
     def held_quests(self) -> set[str]:
         """Quests the client may move back from done (bought shop quests waiting for their item): never a sign of a
@@ -537,11 +655,26 @@ class Session:
                 continue
             if CHALLENGE_BY_NAME[name].is_ex and not self.include_dlc:
                 continue  # the Expansion Pass plays vanilla
-            if any(c not in self.unlocked_characters for c in CHALLENGE_BY_NAME[name].required_characters):
+            if not self.story_party_free and any(c not in self.unlocked_characters
+                                                 for c in CHALLENGE_BY_NAME[name].required_characters):
                 unlocks[ids[0]] = (ids[0],)  # its own clear: closed until its forced heroes are yours
                 continue
             if self.calamity_cleared and any(c not in self.unlocked_characters for c in champions_needed(name)):
                 unlocks[ids[0]] = (ids[0],)  # needs a Champion who is trapped (not yours) since Calamity Strikes
+                continue
+            if any(q not in self.done["quest"] for q in self.challenge_quests.get(name, ())):
+                unlocks[ids[0]] = (ids[0],)  # opened by its quests in the game (Trial of the Ancients, fairies)
+                continue
+            if name in self.dlc_story and self.story_chain:  # Story Only: the clear before it in the chain
+                unlocks[ids[0]] = () if self.dlc_story_open(name) else (ids[0],)
+                continue
+            if self.game_mode == 1:  # Story Only: no other challenge is part of the run (vanilla rules)
+                continue
+            if name in self.dlc_story and self.unlock_items:  # a DLC story mission: open with its unlock item
+                unlocks[ids[0]] = () if name in self.mission_unlocks else (ids[0],)
+                continue
+            if name in self.dlc_story:  # story order: the game's own chain (story and DLC records), as in logic
+                unlocks[ids[0]] = tuple(r for r in struct.unpack_from("<5H", bytes.fromhex(vanilla)) if r)
                 continue
             if self.side_random and name in self.challenge_open_at:  # closed = needs its own clear (never opens)
                 unlocks[ids[0]] = () if self.side_open("challenge", name) else (ids[0],)
@@ -562,6 +695,22 @@ class Session:
                 unlocks[MISSION_RECORD_IDS[name][0]] = (story[self.final_mission],)
         return unlocks
 
+    def waiting_for_heroes(self) -> dict[str, list[str]]:
+        """Missions and challenges that are otherwise open (unlock item in, or opened by the random order) but stay
+        closed until the heroes the game forces into them are yours: name -> heroes still missing. User 2026-11-02:
+        Unlock: EX Liberate the Ancient Lab arrived and nothing said why the mission didn't appear (Riju, Urbosa)."""
+        from ..data_challenges import CHALLENGE_BY_NAME
+        waiting = {}
+        for name in [*self.dlc_story, *self.challenge_open_at]:
+            if name in waiting or name not in CHALLENGE_BY_NAME or name in self.challenges_done:
+                continue
+            opened = (name in self.mission_unlocks if name in self.dlc_story and self.unlock_items
+                      else name in self.challenge_open_at and self.side_open("challenge", name))
+            missing = [c for c in CHALLENGE_BY_NAME[name].required_characters if c not in self.unlocked_characters]
+            if opened and missing and not self.story_party_free:  # (free parties: your heroes are put in)
+                waiting[name] = missing
+        return waiting
+
     @property
     def calamity_cleared(self) -> bool:
         from ..data_challenges import CALAMITY
@@ -572,12 +721,32 @@ class Session:
 
     @property
     def goal_complete(self) -> bool:
-        needed = min(self.goal_story_missions, len(self.mission_ids))
-        if sum(m in self.cleared_missions for m in self.mission_ids) < needed:
+        if self.final_goal:  # clearing The Future of Hyrule (on goal_difficulty or higher) is the goal
+            done = self.difficulty_cleared if self.goal_difficulty else self.cleared_missions
+            return self.final_mission in done
+        return self._goal_counts_met()
+
+    @property
+    def story_names(self) -> list[str]:
+        """Every story mission the goal counts: the base story plus, with include_dlc, Guardian of Remembrance."""
+        return [*self.mission_ids, *self.dlc_story]
+
+    def story_cleared(self) -> set[str]:
+        """Story missions cleared as the goal counts them (on goal_difficulty or harder when that is set)."""
+        if self.goal_difficulty:
+            return self.difficulty_cleared & set(self.story_names)
+        return self.cleared_missions | (self.challenges_done & set(self.dlc_story))
+
+    def _goal_counts_met(self, exclude_final: bool = False) -> bool:
+        """The goal's clears and extras (with final_goal: what opens The Future of Hyrule, one story clear fewer and
+        not counting it)."""
+        missions = [m for m in self.story_names if not (exclude_final and m == self.final_mission)]
+        needed = min(self.goal_story_missions - exclude_final, len(missions))
+        if sum(m in self.cleared_missions or m in self.challenges_done for m in missions) < needed:
             return False
         if len(self.side_done) < self.goal_side_missions:
             return False
-        if self.goal_difficulty and sum(m in self.difficulty_cleared for m in self.mission_ids) < needed:
+        if self.goal_difficulty and sum(m in self.difficulty_cleared for m in missions) < needed:
             return False
         challenges = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
         if len(self.goal_challenge_pool & challenges) < self.goal_challenges:
@@ -587,6 +756,71 @@ class Session:
         if self.goal == 3 and not set(self.boss_rush) <= self.challenges_done:
             return False
         return True
+
+    def goal_summary(self) -> str:
+        """The goal in one line (shown on connect)."""
+        from ..data_save import DIFFICULTIES
+        parts = [] if self.game_mode == 2 else [f"{min(self.goal_story_missions, len(self.story_names))} story missions"
+                 + (f" ending with {self.final_mission}" if self.final_goal else "")]
+        if self.goal_challenges:
+            parts.append(f"{self.goal_challenges} challenges")
+        if self.goal_side_missions:
+            parts.append(f"{self.goal_side_missions} challenges or quests")
+        if self.goal == 2:
+            parts.append("every hero")
+        if self.goal == 3:
+            parts.append(f"the {len(self.boss_rush)} boss challenges")
+        text = "Your goal: " + ", ".join(parts)
+        if self.goal_difficulty:
+            text += f"; only clears on {DIFFICULTIES[self.goal_difficulty - 1]} or harder count"
+        return text + ". /todo shows your progress."
+
+    def goal_banner_text(self) -> str:
+        """The goal in one short line for the map banner (user, 2026-11-02)."""
+        from ..data_save import DIFFICULTIES
+        if self.goal_complete:
+            return "Goal complete"
+        parts = [] if self.game_mode == 2 else [
+            f"Story {len(self.story_cleared())}/{min(self.goal_story_missions, len(self.story_names))}"]
+        if self.goal_challenges:
+            done = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
+            parts.append(f"Challenges {len(self.goal_challenge_pool & done)}/{self.goal_challenges}")
+        if self.goal_side_missions:
+            parts.append(f"Side {len(self.side_done)}/{self.goal_side_missions}")
+        if self.goal == 2:
+            parts.append(f"Heroes {len(set(self.all_characters) & self.unlocked_characters)}/{len(self.all_characters)}")
+        if self.goal == 3:
+            parts.append(f"Bosses {len(set(self.boss_rush) & self.challenges_done)}/{len(self.boss_rush)}")
+        text = "Goal: " + "  ·  ".join(parts)
+        if self.goal_difficulty:
+            text += f"  ({DIFFICULTIES[self.goal_difficulty - 1]}+)"
+        return text
+
+    def goal_progress(self) -> list[str]:
+        """What the goal needs and how far you are, one line each (user, 2026-11-02: a seed's goal_difficulty went
+        unnoticed until the whole story was cleared on Easy)."""
+        from ..data_save import DIFFICULTIES
+        level = DIFFICULTIES[self.goal_difficulty - 1] if self.goal_difficulty else ""
+        on = f" on {level} or harder" if level else ""
+        needed = min(self.goal_story_missions, len(self.story_names))
+        lines = [] if self.game_mode == 2 else [  # (Challenges Only: no story goal)
+            f"Goal: {len(self.story_cleared())}/{needed} story missions cleared{on}"
+            + (f" (the last one is {self.final_mission})" if self.final_goal else "")]
+        if self.goal_challenges:
+            done = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
+            lines.append(f"Goal: {len(self.goal_challenge_pool & done)}/{self.goal_challenges} challenges cleared{on}")
+        if self.goal_side_missions:
+            lines.append(f"Goal: {len(self.side_done)}/{self.goal_side_missions} challenges or quests completed")
+        if self.goal == 2:
+            lines.append(f"Goal: {len(set(self.all_characters) & self.unlocked_characters)}/{len(self.all_characters)}"
+                         " heroes received")
+        if self.goal == 3:
+            lines.append(f"Goal: {len(set(self.boss_rush) & self.challenges_done)}/{len(self.boss_rush)} boss challenges")
+        if self.goal_complete:
+            lines.append("Goal complete.")
+        elif level:
+            lines.append(f"Only clears on {level} or harder count for the goal.")
+        return lines
 
     def note_activity(self, now: float) -> None:
         """Call whenever a new check is reported (or on connect) so quiet spells can be measured."""

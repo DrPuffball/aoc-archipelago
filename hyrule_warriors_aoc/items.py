@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from .data_challenges import DLC_STORY_MISSIONS
 from typing import TYPE_CHECKING
 
 from BaseClasses import Item, ItemClassification
 
 from .data import (
+    FINAL_MISSION,
     ALL_CHARACTERS,
     CHARACTER_UPGRADES,
     FEATURES,
@@ -20,7 +22,6 @@ from .data import (
 )
 
 from .data_rewards import REWARD_BY_ITEM, REWARD_GROUPS
-from .data_challenges import CALAMITY, RESCUES
 from .options import MissionUnlocks, SheikahRunes
 
 if TYPE_CHECKING:
@@ -81,6 +82,7 @@ _register(list(FILLER_ITEMS), 700, 100)
 _register([rune_item(r) for r in RUNES], 800, 50)
 _register([unlock_item(m.name) for m in MISSIONS[1:]], 850, 19)
 _register([unlock_item(MISSIONS[0].name)], 869, 1)  # 0.9.54-0.9.56 seeds only (Hyrule Field is first again since)
+_register([unlock_item(m) for m in DLC_STORY_MISSIONS], 870, 8)  # 0.9.74+: Guardian of Remembrance (include_dlc)
 _register([g.item for g in REWARD_GROUPS], 900, 50)
 
 UPGRADE_FAMILIES = set(CHARACTER_UPGRADES)
@@ -130,7 +132,9 @@ def add_bonus_checks(world: AgeOfCalamityWorld, surplus: int) -> int:
     # would all be sent the moment a player connects
     order = world.mission_order[1:world.options.goal_story_missions.value]
     challenges = sorted(world.checked_challenges)
-    caps = [(m, BONUS_PER_MISSION) for m in order] + [(c, BONUS_PER_CHALLENGE) for c in challenges]
+    # (the DLC story missions are story missions: as many as a story clear)
+    caps = [(m, BONUS_PER_MISSION) for m in order] + [
+        (c, BONUS_PER_MISSION if c in world.dlc_story else BONUS_PER_CHALLENGE) for c in challenges]
     surplus = max(0, min(surplus, sum(cap for _, cap in caps)))
     counts = {name: 0 for name, _ in caps}
     left = surplus
@@ -139,6 +143,14 @@ def add_bonus_checks(world: AgeOfCalamityWorld, surplus: int) -> int:
             if left and counts[name] < cap:
                 counts[name] += 1
                 left -= 1
+    ut = getattr(world, "ut_data", None)
+    if ut:  # Universal Tracker: the seed's own bonus checks (including those pacing added in pre_fill)
+        counts = {name: 0 for name, _ in caps}
+        counts.update({m: len(v) for m, v in ut.get("mission_bonus_ids", {}).items()})
+        counts.update({c: len(v) for c, v in ut.get("challenge_bonus_ids", {}).items()})
+        order = [m for m in world.mission_order if counts.get(m)]
+        challenges = sorted(c for c in counts if c not in world.mission_order and counts[c])
+        surplus = sum(counts.values())
     world.bonus_checks, world.challenge_bonus_checks = {}, {}
     for mission in order:
         if counts[mission]:
@@ -174,11 +186,18 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
     wanted = []
     if options.mission_unlocks == MissionUnlocks.option_items:  # first, so they get checks before anything else
         wanted += [unlock_item(m) for m in world.mission_order[1:]
-                   if m not in world.starting_unlocks and m not in RESCUES and m != CALAMITY]  # (they open by themselves)
+                   if m not in world.starting_unlocks
+                   and not (m == FINAL_MISSION and options.final_mission_goal)]  # opens by the goal's counts
+        wanted += [unlock_item(m) for m in world.dlc_story]  # DLC story missions open by their own items too
     wanted += [character_item(c) for c in world.characters if c not in world.starting_characters]
-    wanted += [f"Feature: {f}" for f in sorted(f for f in FEATURES if f in options.locked_features.value)]
+    wanted += [f"Feature: {f}" for f in sorted(f for f in FEATURES if f in options.locked_features.value)
+               if not (f == "Shops" and options.open_shops)]  # open_shops wins over a locked Shops feature
     if options.sheikah_runes == SheikahRunes.option_shuffled:
         wanted += [rune_item(r) for r in ITEM_RUNES]  # Remote Bombs is the Slate: always yours
+    if options.hint_mission_unlocks:  # free hints at the room start (user options)
+        options.start_hints.value |= {name for name in wanted if name.startswith(UNLOCK_PREFIX)}
+    if options.hint_heroes:
+        options.start_hints.value |= {character_item(c) for c in world.characters if c not in world.starting_characters}
 
     # Upgrades are kept whole: every hero gets every copy the options promise. When checks are short, a random share
     # of them is given at the start of the run instead.

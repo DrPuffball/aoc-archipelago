@@ -1,5 +1,5 @@
 """
-On-screen notices over Ryujinx: a small borderless, always-on-top, click-through box in the top-right corner of the
+On-screen notices over the emulator (Ryujinx or Eden): a small borderless, always-on-top, click-through box in the top-right corner of the
 Ryujinx window ("Received X from Y" and the client's other notices), each shown for a few seconds. It follows the
 Ryujinx window and hides while Ryujinx is not the active window, so it never covers other programs.
 
@@ -22,6 +22,8 @@ BUSY_SECONDS = 3.5  # each notice's turn while more are waiting
 MARGIN_X, MARGIN_Y = 24, 64  # from the Ryujinx window's top-right corner (clears its menu bar)
 STATUS_MARGIN_Y = 48  # the cursor panel: from the bottom-right corner (clears Ryujinx's status bar)
 STATUS_BACKGROUND = "#1d2a1f"
+BANNER_MARGIN_Y = 40  # the goal banner: top centre, just under the emulator's menu bar
+BANNER_BACKGROUND = "#20182a"
 BACKGROUND, FOREGROUND = "#141820", "#f2e6c4"
 _pids: list = [0.0, set()]  # (when read, Ryujinx process ids)
 
@@ -32,6 +34,7 @@ class Overlay:
         self._thread: threading.Thread | None = None
         self.enabled = sys.platform == "win32"
         self.status: str | None = None  # the cursor panel's text (shown while set; None hides it)
+        self.banner: str | None = None  # the goal banner's text (top centre, shown while set)
 
     def _start(self) -> None:
         if self._thread is None:
@@ -50,6 +53,14 @@ class Overlay:
         if not self.enabled:
             return
         self.status = text or None
+        if text:
+            self._start()
+
+    def set_banner(self, text: str | None) -> None:
+        """The goal banner (top centre): stays while text is set (goal progress while on the world map)."""
+        if not self.enabled:
+            return
+        self.banner = text or None
         if text:
             self._start()
 
@@ -88,6 +99,17 @@ class Overlay:
         panel.update_idletasks()
         _click_through(panel)
         panel_shown = False
+        top = tk.Toplevel(root)
+        top.withdraw()
+        top.overrideredirect(True)
+        top.attributes("-topmost", True)
+        top.attributes("-alpha", 0.85)
+        top.configure(bg=BANNER_BACKGROUND)
+        banner_label = tk.Label(top, bg=BANNER_BACKGROUND, fg=FOREGROUND, font=("Segoe UI", 10), padx=12, pady=4)
+        banner_label.pack()
+        top.update_idletasks()
+        _click_through(top)
+        top_shown = False
         pending: list[str] = []
         current: tuple[float, str] | None = None  # (shown until, text): one notice at a time (user request)
         shown = False
@@ -103,8 +125,22 @@ class Overlay:
             if current is None and pending:
                 # a shorter turn each while more are waiting, so a burst of items doesn't take minutes
                 current = (now + (SHOW_SECONDS if len(pending) == 1 else BUSY_SECONDS), pending.pop(0))
-            status = self.status
-            rect = _ryujinx_rect() if current or status else None
+            status, banner = self.status, self.banner
+            rect = _ryujinx_rect() if current or status or banner else None
+            if banner and rect:
+                span = rect[2] - rect[0]
+                banner_label.configure(text=banner, font=("Segoe UI", max(9, min(12, span // 140))))
+                top.update_idletasks()
+                width, height = top.winfo_reqwidth(), top.winfo_reqheight()
+                top.geometry(f"{width}x{height}+{rect[0] + (span - width) // 2}+{rect[1] + BANNER_MARGIN_Y}")
+                if not top_shown:
+                    top.deiconify()
+                    top.attributes("-topmost", True)
+                    _click_through(top)
+                    top_shown = True
+            elif top_shown:
+                top.withdraw()
+                top_shown = False
             if status and rect:
                 span = rect[2] - rect[0]
                 status_label.configure(text=status, wraplength=max(240, int(span * 0.4)),
@@ -155,7 +191,8 @@ def _click_through(root) -> None:
 
 
 def _ryujinx_rect() -> tuple[int, int, int, int] | None:
-    """Screen rectangle (left, top, right, bottom) of the Ryujinx window when it is the active window, else None."""
+    """Screen rectangle (left, top, right, bottom) of the emulator window (Ryujinx or Eden) when it is the active
+    window, else None."""
     import ctypes
     from ctypes import wintypes
     from .ryujinx import ryujinx_pids

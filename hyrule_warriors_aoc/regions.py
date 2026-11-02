@@ -8,6 +8,7 @@ from .locations import (
     AgeOfCalamityLocation,
     challenge_location,
     create_location,
+    difficulty_location,
     mission_location,
     quest_location,
     weapon_location,
@@ -54,6 +55,9 @@ def create_regions(world: AgeOfCalamityWorld) -> None:
         multiworld.regions.append(region)
         menu.connect(region, f"Start {mission}")
         create_location(world, region, mission_location(mission))
+        for level in range(1, world.difficulty_levels + 1):
+            create_location(world, region, difficulty_location(mission_location(mission), level)).difficulty_of = \
+                mission_location(mission)
         _event(world, region, f"Event: Cleared {mission}", cleared_event(mission))
 
     story = Region("Story Complete", player, multiworld)
@@ -81,6 +85,10 @@ def create_regions(world: AgeOfCalamityWorld) -> None:
         _event(world, side, f"Event: Challenge {name}", challenge_event(name))
         if name in world.checked_challenges:
             create_location(world, side, challenge_location(name))
+            if world.options.difficulty_checks_challenges:
+                for level in range(1, world.difficulty_levels + 1):
+                    create_location(world, side, difficulty_location(challenge_location(name), level)).difficulty_of = \
+                        challenge_location(name)
     for name in world.active_quests:
         _event(world, side, f"Event: Quest {name}", quest_event(name))
         if name in world.checked_quests:

@@ -5,15 +5,16 @@ from typing import TYPE_CHECKING
 from BaseClasses import LocationProgressType, ItemClassification
 from worlds.generic.Rules import add_item_rule, set_rule
 
-from .data import BOSS_CHALLENGES, ITEM_RUNES, RUNE_CHALLENGES, WEAPON_BY_NAME
-from .data_challenges import CALAMITY, CHALLENGE_BY_NAME, CHAMPIONS, GAME_LEVEL, RESCUES, challenge_gate
+from .data import BOSS_CHALLENGES, FINAL_MISSION, ITEM_RUNES, MISSION_BY_NAME, RUNE_CHALLENGES, WEAPON_BY_NAME
+from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHAMPIONS, GAME_LEVEL, challenge_gate,
+                              vanilla_prerequisites)
 from .data_koroks import korok_location
 from .data_quest_unlocks import GAME_QUEST_PREREQS
 from .data_rewards import ALL_GROUPS, FEATURE_CHALLENGES
 from .data_quests import CHAPTER_TWO_MISSIONS, QUEST_BY_NAME
 from .items import character_item, rune_item, unlock_item
 from .locations import challenge_bonus_location, challenge_location, mission_location, quest_location, weapon_location
-from .options import ChallengeLogic, Goal, MissionUnlocks, SheikahRunes, WeaponCheckLogic
+from .options import ChallengeLogic, GameMode, Goal, MissionUnlocks, SheikahRunes, StoryParty, WeaponCheckLogic
 from .regions import POST_STORY_EVENT, STORY_EVENT, VICTORY_EVENT, challenge_event, cleared_event, quest_event
 
 if TYPE_CHECKING:
@@ -83,7 +84,14 @@ def level_gate(name: str) -> str | None:
 
 def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
     challenge = CHALLENGE_BY_NAME[name]
-    if name in world.challenge_open_at:
+    if name in world.dlc_story and world.options.mission_unlocks == MissionUnlocks.option_items:
+        required = [unlock_item(name)]  # a DLC story mission opens with its own unlock item, like the base story
+    elif name in world.dlc_story and world.story_chain:  # Story Only: the previous mission of the chain
+        before = world.chain_before(name)
+        required = [cleared_event(before) if before in MISSION_BY_NAME else challenge_event(before)]
+    elif name in world.dlc_story:  # story order: the game's own chain (after Calamity Strikes ...), not post-story
+        required = [cleared_event(n) if n in MISSION_BY_NAME else challenge_event(n) for n in vanilla_prerequisites(name)]
+    elif name in world.challenge_open_at:
         required = []  # side_unlocks random: opens by completion count (side_open_count), not by a story gate
     else:
         by_level = world.options.challenge_logic == ChallengeLogic.option_by_level
@@ -95,8 +103,11 @@ def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
             required.append(rune_item(rune))  # (Remote Bombs is always on: the client keeps the Slate)
         if world.options.sheikah_runes == SheikahRunes.option_vanilla:  # the game hands it out in that mission
             required.append(cleared_event(RUNE_SOURCE[rune]))
+    required += [quest_event(q) for q in world.challenge_quests.get(name, ())]  # the game's own quest gate
     if world.fairy_locked and name in FEATURE_CHALLENGES["Fairy Fountains"]:
         required.append("Feature: Fairy Fountains")
+    if world.options.story_party == StoryParty.option_free:  # the client puts your heroes in their forced slots
+        return required  # (0.9.74, user: challenges open whenever the randomizer says, like the story)
     return required + [character_item(c) for c in challenge.required_characters]
 
 
@@ -113,18 +124,18 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
     # Story slots: a mission is gated by whichever missions sit in the prerequisite slots.
     unlock_items = world.options.mission_unlocks == MissionUnlocks.option_items
     first = world.mission_order[0]
+    final_goal = bool(world.options.final_mission_goal)
     for slot, mission in world.slot_to_mission.items():
-        if mission == CALAMITY:  # opens once all four Champions are yours (they can't be trapped then)
-            required = tuple(character_item(c) for c in CHAMPIONS)
-            if not unlock_items:
-                required += tuple(cleared_event(world.slot_to_mission[p]) for p in world.slot_prerequisites[slot])
-        elif unlock_items and mission in RESCUES:  # opened by Calamity Strikes' clear (no unlock item)
-            required = (cleared_event(CALAMITY),)
-        elif unlock_items:  # a mission opens with its unlock item alone (the first one is open from the start)
+        if final_goal and mission == FINAL_MISSION:
+            continue  # opens when the goal's counts are met (below)
+        if unlock_items:  # a mission opens with its unlock item alone (the first one is open from the start)
             required = (unlock_item(mission),) if mission != first else ()
         else:
-            required = tuple(cleared_event(world.slot_to_mission[p]) for p in world.slot_prerequisites[slot])
+            required = tuple(cleared_event(world.slot_to_mission[p]) if p in world.slot_to_mission else challenge_event(p)
+                             for p in world.slot_prerequisites[slot])  # (Story Only: a DLC story mission can come before)
         required += tuple(character_item(c) for c in world.mission_party.get(mission, ()))
+        if mission == CALAMITY:  # also all four Champions yours (a Champion you don't have would be trapped)
+            required += tuple(character_item(c) for c in CHAMPIONS)
         party = [character_item(c) for c in world.party_needs.get(mission, ())]  # any hero it lets you pick
         side_needed = world.slot_side_required.get(slot, 0)
         if required or side_needed or party:
@@ -132,11 +143,19 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
             set_rule(world.get_entrance(f"Start {mission}"), rule)
     set_rule(world.get_entrance("Finish The Story"), _rule(player, victory_needs))
     # Post-story challenges and quests: open after post_story_unlock story clears (20 = the whole story, as vanilla)
-    post_needed = min(world.options.post_story_unlock.value, len(victory_needs))
+    # With final_mission_goal The Future of Hyrule is the goal itself: post-story content opens after the other story
+    # missions, or a goal needing challenges or side missions would wait on itself (option fuzz 2026-11-02: 4 of 300
+    # random combinations were unbeatable that way).
+    post_events = victory_needs if not final_goal else tuple(e for e in victory_needs if e != cleared_event(FINAL_MISSION))
+    post_needed = min(world.options.post_story_unlock.value, len(post_events))
     set_rule(world.get_entrance("Open Post-Story Content"),
-             lambda state: sum(state.has(e, player) for e in victory_needs) >= post_needed)
+             lambda state: sum(state.has(e, player) for e in post_events) >= post_needed)
     # The goal: goal_story_missions story clears (any of them; 20 = all) plus the goal option's extras.
-    story_needed = min(world.options.goal_story_missions.value, len(victory_needs))
+    # Story missions for the goal: the 20 (in their slots) plus, with include_dlc, Guardian of Remembrance's 8
+    story_events = victory_needs + tuple(challenge_event(c) for c in world.dlc_story)
+    story_needed = min(world.options.goal_story_missions.value, len(story_events))
+    if world.game_mode == GameMode.option_challenges_only:
+        story_needed = 0  # the goal is challenges alone
     goal_all = []
     if world.options.goal == Goal.option_story_and_all_characters:
         goal_all += [character_item(c) for c in world.characters]
@@ -146,9 +165,20 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
     extras = _rule(player, goal_all, count_of=world.side_counted if goal_count else (), count=goal_count)
     challenge_events = [challenge_event(c) for c in world.goal_challenge_pool]
     challenges_needed = min(world.options.goal_challenges.value, len(challenge_events))
-    set_rule(world.get_entrance("Finish All Main Missions"),
-             lambda state: extras(state) and sum(state.has(e, player) for e in victory_needs) >= story_needed
-             and sum(state.has(e, player) for e in challenge_events) >= challenges_needed)
+    if final_goal:  # The Future of Hyrule opens after goal_story_missions - 1 other clears (+ challenges, extras)
+        others = tuple(e for e in story_events if e != cleared_event(FINAL_MISSION))
+        heroes = _rule(player, tuple(character_item(c) for c in world.mission_party.get(FINAL_MISSION, ())),
+                       [character_item(c) for c in world.party_needs.get(FINAL_MISSION, ())])
+        set_rule(world.get_entrance(f"Start {FINAL_MISSION}"),
+                 lambda state: extras(state) and heroes(state)
+                 and sum(state.has(e, player) for e in others) >= story_needed - 1
+                 and sum(state.has(e, player) for e in challenge_events) >= challenges_needed)
+        set_rule(world.get_entrance("Finish All Main Missions"),
+                 lambda state: state.has(cleared_event(FINAL_MISSION), player))
+    else:
+        set_rule(world.get_entrance("Finish All Main Missions"),
+                 lambda state: extras(state) and sum(state.has(e, player) for e in story_events) >= story_needed
+                 and sum(state.has(e, player) for e in challenge_events) >= challenges_needed)
     world.multiworld.completion_condition[player] = lambda state: state.has(VICTORY_EVENT, player)
 
     for name in world.active_challenges:
@@ -177,7 +207,7 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
         def copies_for(item: str, quest: str):
             return _copies_rule(player, item, copies_needed(ALL_GROUPS[item], quest, world.group_copies[item]))
 
-        for pre in () if world.side_random else GAME_QUEST_PREREQS.get(name, ()):  # the game only shows this quest once these are done in game
+        for pre in () if name in world.quest_open_at else GAME_QUEST_PREREQS.get(name, ()):  # the game only shows this quest once these are done in game
             locker = world.item_quests.get(pre) or world.unlock_quests.get(pre)
             if locker in world.reward_progression:
                 rule = both(rule, copies_for(locker, pre))

@@ -73,14 +73,14 @@ HERO_STARTER_KIND = {
     "Link": 4, "Zelda": 181, "King Rhoam": 191, "Mipha": 201, "Daruk": 211, "Revali": 221, "Urbosa": 231,
     "Impa": 241, "Sidon": 251, "Yunobo": 261, "Teba": 271, "Riju": 281, "Hestu": 291, "Great Fairies": 301,
     "Master Kohga": 311, "Monk Maz Koshia": 321, "Terrako": 331, "Calamity Ganon": 341,
-    "Purah & Robbie": 381, "Sooga": 391,
+    "Purah & Robbie": 381, "Sooga": 391, "Battle-Tested Guardian": 371,
 }
 
 HERO_SLOTS = {
     "Link": 0, "Zelda": 1, "King Rhoam": 2, "Mipha": 3, "Daruk": 4, "Revali": 5, "Urbosa": 6,
     "Impa": 7, "Sidon": 8, "Yunobo": 9, "Teba": 10, "Riju": 11, "Hestu": 12, "Great Fairies": 13,
     "Master Kohga": 14, "Monk Maz Koshia": 15, "Terrako": 16, "Calamity Ganon": 17,
-    "Purah & Robbie": 19, "Sooga": 20,
+    "Purah & Robbie": 19, "Sooga": 20, "Battle-Tested Guardian": 18,
 }
 
 # Base-game materials handed out by "Material Bundle" (indices from the save editor; no trophies,
@@ -89,6 +89,40 @@ HERO_SLOTS = {
 HEARTY_MEAL = {0: 5, 22: 5}  # Hearty Durian x5, Hyrule Herb x5
 # Weapon levels: 20 at first; A Monumental Undertaking raises the cap to 25, The Legendary Blacksmith to 30 (wikis).
 WEAPON_LEVEL_CAP, WEAPON_LEVEL_CAP_MONUMENT = 20, 25
+# Bytes a quest sets when the player completes it, which a quest state alone does not: (block, offset, value), block
+# FLAGS = [P+0x5A0], PROFILE = [P+0x588]. The client sets them for every quest it marks done (open from the start, or
+# collected by a release). [read from probe logs 2026-11-02: each quest's diff when it was completed alone; not yet
+# tried by writing them]
+FLAGS_BLOCK, PROFILE_BLOCK = 0x5A0, 0x588
+from .data_rewards import RECIPES as _RECIPES  # noqa: E402 (recipe numbers from the quest table)
+QUEST_EFFECTS: dict[str, tuple[tuple[int, int, int], ...]] = {
+    # cooking / the pre-mission meal menu (the user never saw the menu with the quest only marked done)
+    "Hot Meals in a Pot": ((FLAGS_BLOCK, 0x1A07, 1), (PROFILE_BLOCK, 0x2C3, 1)),
+    # the Sheikah Sensor (the user only got it after doing the quest by hand)
+    "Needed: Researchers!": ((PROFILE_BLOCK, 0xC7B, 1),),
+    # shops
+    "Brilliance for the Boutique": ((FLAGS_BLOCK, 0x319, 1),),
+    "Gotta Have a Sign": ((FLAGS_BLOCK, 0x31A, 1),),
+    "Pumpkin Burglars": ((FLAGS_BLOCK, 0x31C, 1),),
+    "Wanted: Shop Assistant": ((FLAGS_BLOCK, 0x31D, 1),),
+    "An End to Fighting": ((FLAGS_BLOCK, 0x31E, 1),),
+    "Dyeing to Make Contact": ((FLAGS_BLOCK, 0x321, 1),),
+    "Relief for Soldier Stress": ((FLAGS_BLOCK, 0x323, 1),),
+    # the Smithy and the Military Training Camp (service ids 8 and 10 -> flags 0x318 + id, like the shops above): a new
+    # starter save had both quests done but both flags 0 and neither facility on the map (user, 2026-11-02)
+    "Brawny Blacksmiths": ((FLAGS_BLOCK, 0x320, 1),),
+    "Entrance Test": ((FLAGS_BLOCK, 0x322, 1),),
+    # stables (one flag on, a paired one off)
+    "On the Hook": ((FLAGS_BLOCK, 0x5BB, 1), (FLAGS_BLOCK, 0x72E, 0)),
+    "Swanked-Up Stable": ((FLAGS_BLOCK, 0x5BC, 1), (FLAGS_BLOCK, 0x72F, 0)),
+    "Help Them on Their Way": ((FLAGS_BLOCK, 0x5BE, 1), (FLAGS_BLOCK, 0x731, 0)),
+    "Anything but Bugs": ((FLAGS_BLOCK, 0x5C0, 1), (FLAGS_BLOCK, 0x733, 0)),
+    "Hoping for Heat Relief": ((FLAGS_BLOCK, 0x5C4, 1), (FLAGS_BLOCK, 0x737, 0)),
+    "Curry Connoisseur": ((FLAGS_BLOCK, 0x5BD, 1), (FLAGS_BLOCK, 0x730, 0)),  # [read 2026-11-02, handed in on Eden]
+    # recipes: one byte each, profile 0x2B5 + the recipe number in the quest's row (all 25, data_rewards.RECIPES)
+    **{q: ((PROFILE_BLOCK, 0x2B5 + n, 1),) for q, n in _RECIPES.items()},
+}
+
 BUNDLE_MATERIALS = tuple(list(range(0, 52)) + list(range(64, 147)))
 
 # Mission name -> record indices. Two-part story missions have two records; all must be set.
@@ -476,6 +510,110 @@ STORY_SUPPORT: dict[int, tuple[str, ...]] = {
     7: ('Zelda',), 9: ('Zelda',), 12: ('Zelda',), 18: ('Mipha', 'Daruk'), 20: ('Revali', 'Urbosa'),
     23: ('Sidon', 'Purah & Robbie'), 25: ('Urbosa', 'Riju', 'Purah & Robbie'),
 }
+# Heroes a story mission needs from its start: never moved into a forced slot (those can join late). [user report,
+# 2026-11-01: Mipha in Daruk's late slot 4 softlocked Relentless as a Waterfall at the injured captain]
+STORY_NEEDED_EARLY: dict[int, tuple[str, ...]] = {23: ("Mipha",)}
+# Challenges' forced parties (the same 4 bytes at +71 of the mission parameter table t009cc294, read from the game's
+# data; 0.9.74): with story_party free the client gives them your heroes in place of forced heroes you don't have,
+# like the story (user, 2026-11-02: missions open whenever the randomizer says, your party is forced in).
+VANILLA_CHALLENGE_PARTY: dict[int, str] = {
+    118: '04000000',  # Heart's Escort
+    119: '07000000',  # Wisdom of the Storm
+    120: '09000000',  # Escorting the Injured
+    121: '0a000000',  # Polishing His Technique
+    122: '0b000000',  # Winged Escort
+    123: '0c000000',  # The Chief-in-Training
+    125: '0b000000',  # Hero of the Rito
+    127: '01000000',  # The Royal Escort
+    136: '01000000',  # Link: One-Handed Weapons
+    137: '01000000',  # Link: Two-Handed Weapons
+    138: '01000000',  # Link: Spears
+    139: '02000000',  # Zelda's Training
+    140: '03000000',  # King Rhoam's Training
+    141: '04000000',  # Mipha's Training
+    142: '05000000',  # Daruk's Training
+    143: '06000000',  # Revali's Training
+    144: '07000000',  # Urbosa's Training
+    145: '08000000',  # Impa's Training
+    146: '02000000',  # Zelda's Training: Bows
+    147: '09000000',  # Sidon's Training
+    148: '0a000000',  # Yunobo's Training
+    149: '0b000000',  # Teba's Training
+    150: '0c000000',  # Riju's Training
+    151: '0d000000',  # Hestu's Training
+    152: '0e000000',  # Great Fairy Training
+    153: '0f000000',  # Master Kohga's Training
+    154: '10000000',  # Monk's Training
+    155: '11000000',  # Terrako's Training
+    156: '12000000',  # Ganon's Training
+    161: '04000000',  # Invading Terrors
+    172: '01000000',  # The So-Called Knight
+    173: '04090000',  # Sibling Bonds
+    175: '090a0b0c',  # Generational Conflict
+    176: '05000000',  # Rampaging Malice
+    177: '0a050000',  # Apprentice Yunobo
+    178: '08000000',  # Impa's Damage Control
+    179: '0c000000',  # Fight Lightning with Lightning
+    180: '0f000000',  # Nap Quest!
+    182: '11000000',  # Guardian Showdown
+    183: '060d0000',  # Hunting Partners
+    184: '01070000',  # Shadow of Ganon
+    190: '09000000',  # Sidon vs. the Octoroks
+    207: '04000000',  # Swift Spear of the Zora
+    208: '05000000',  # Tough Bulwark of the Gorons
+    209: '06000000',  # Fierce Gale of the Rito
+    210: '07000000',  # Mighty Thunder of the Gerudo
+    212: '0f080000',  # The Master Kohga Chronicles!
+    213: '04090000',  # Zora Mettle
+    214: '050a0000',  # Goron Spirit
+    215: '060b0000',  # Rito Discipline
+    216: '070c0000',  # Gerudo Fury
+    226: '03000000',  # Guardian Graveyard
+    227: '02000000',  # A Royal Investigation
+    229: '01080000',  # Fruit for the Princess!
+    234: '28090000',  # Defending Cephla Lake
+    300: '11000000',  # EX To Zelda's Side
+    301: '09000400',  # EX Battle of Goponga Village
+    302: '0a000500',  # EX Battle for Kakariko Village
+    303: '060b0000',  # EX Searching Hyrule Forest
+    304: '070c0000',  # EX Liberate the Ancient Lab
+    305: '00000300',  # EX The Princess and the King
+    306: '0f001500',  # EX The Yiga Clan's Retreat
+    307: '11020000',  # EX Guardian of Remembrance
+    350: '01000000',  # EX Link: Flails
+    351: '02000000',  # EX Zelda: Master Cycle
+    352: '13000000',  # EX Battle-Tested Guardian Training
+    366: '01020800',  # EX Evacuating Hyrule
+    367: '14000000',  # EX Purah & Robbie's Training
+    368: '15000000',  # EX Sooga's Training
+    371: '14110000',  # EX The Budget Battle
+    372: '15000000',  # EX Sooga's Daily Routine
+}
+# Their support heroes (AI allies, +75..+79): never put in the party there.
+CHALLENGE_SUPPORT: dict[int, tuple[str, ...]] = {
+    118: ('Link',),
+    119: ('Yunobo',),
+    120: ('Mipha',),
+    121: ('Daruk',),
+    122: ('Revali',),
+    123: ('Urbosa', 'Sooga'),
+    127: ('Zelda', 'Sooga'),
+    137: ('Daruk',),
+    140: ('Link',),
+    151: ('Impa',),
+    152: ('Hestu',),
+    155: ('King Rhoam',),
+    172: ('Revali', 'Sidon'),
+    175: ('Mipha', 'Daruk', 'Revali', 'Urbosa'),
+    178: ('Purah & Robbie',),
+    179: ('Mipha',),
+    229: ('Sooga',),
+    300: ('Impa', 'Zelda'),
+    305: ('Mipha', 'Daruk', 'Revali', 'Urbosa', 'Sidon'),
+    307: ('Purah & Robbie',),
+    371: ('King Rhoam',),
+    372: ('Master Kohga', 'Impa'),
+}
 
 # Starting weapon type per hero (the hero record's equipped-weapon byte): every hero's weapon types start at their own
 # base, read from the saves (100% save: Rhoam 61, Impa 111, Sidon 121 ... Sooga 241; Zelda 51 and Urbosa 101 in the
@@ -484,6 +622,7 @@ HERO_STARTER_WEAPON: dict[str, int] = {
     "Link": 1, "Zelda": 51, "King Rhoam": 61, "Mipha": 71, "Daruk": 81, "Revali": 91, "Urbosa": 101, "Impa": 111,
     "Sidon": 121, "Yunobo": 131, "Teba": 141, "Riju": 151, "Hestu": 161, "Great Fairies": 171, "Master Kohga": 181,
     "Monk Maz Koshia": 191, "Terrako": 201, "Calamity Ganon": 211, "Purah & Robbie": 231, "Sooga": 241,
+    "Battle-Tested Guardian": 221,  # slot 18: types step by 10 per slot [confirmed: granted and played, 2026-11-02]
 }
 
 # Mission unlock table (LinkData2 t009dc714, 400 rows x 36): +4..+0xB up to four records that must be cleared,
@@ -1221,7 +1360,8 @@ ABILITY_CATEGORIES: dict[str, tuple[int, ...]] = {
     "Urbosa": (11,), "Impa": (12,), "Sidon": (13,), "Yunobo": (14,), "Teba": (15,), "Riju": (16,), "Hestu": (17,),
     "Great Fairies": (18,), "Master Kohga": (19,), "Monk Maz Koshia": (20,), "Terrako": (21,), "Calamity Ganon": (22,),
 }
-ABILITY_CATEGORIES_DLC: dict[str, tuple[int, ...]] = {"Link": (23,), "Zelda": (24,), "Purah & Robbie": (25,), "Sooga": (27,)}
+ABILITY_CATEGORIES_DLC: dict[str, tuple[int, ...]] = {"Link": (23,), "Zelda": (24,), "Purah & Robbie": (25,), "Sooga": (27,),
+                                                    "Battle-Tested Guardian": (26,)}  # 26 [guess: the free category]
 # Weapon capacity: profile + 0x7A6 = level, slots = 20 + level [confirmed in game]; the dance quests (type 15) set it
 # to their tier (row +0x31), at most 4.
 WEAPON_CAPACITY_LEVEL, WEAPON_CAPACITY_MAX = 0x7A6, 4
@@ -1251,6 +1391,7 @@ UPGRADE_CATEGORY_HERO = {
     23: 'Link',
     24: 'Zelda',
     25: 'Purah & Robbie',
+    26: 'Battle-Tested Guardian',  # [guess: its quests (EX The Only Option, EX The Science of Battle) name no hero]
     27: 'Sooga',
 }
 def quest_hero(quest: str) -> str | None:

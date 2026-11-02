@@ -54,20 +54,30 @@ if sys.platform == "win32":
     _k32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PE32)]
 
 
-def ryujinx_pids() -> list[int]:
+EMULATOR_EXES = {"ryujinx.exe": "Ryujinx", "eden.exe": "Eden"}  # supported emulators (auto-detected)
+
+
+def emulator_processes() -> list[tuple[int, str]]:
+    """(pid, emulator name) of every running supported emulator."""
     if sys.platform != "win32":
         return []
     snap = _k32.CreateToolhelp32Snapshot(0x2, 0)
-    pids = []
+    found = []
     entry = _PE32()
     entry.dwSize = ctypes.sizeof(_PE32)
     ok = _k32.Process32FirstW(snap, ctypes.byref(entry))
     while ok:
-        if entry.szExeFile.lower() == "ryujinx.exe":
-            pids.append(entry.th32ProcessID)
+        name = EMULATOR_EXES.get(entry.szExeFile.lower())
+        if name:
+            found.append((entry.th32ProcessID, name))
         ok = _k32.Process32NextW(snap, ctypes.byref(entry))
     _k32.CloseHandle(snap)
-    return pids
+    return found
+
+
+def ryujinx_pids() -> list[int]:
+    """Pids of every supported emulator (Ryujinx and, since 0.9.73, Eden; the name predates Eden)."""
+    return [pid for pid, _ in emulator_processes()]
 
 
 GAME_TITLE_MARKS = ("Age of Calamity", "01002B00111A2000")  # in Ryujinx's window title while the game runs
@@ -163,6 +173,18 @@ class Process:
         return bool(_k32.WriteProcessMemory(self.h, ctypes.c_void_p(addr), data, len(data), ctypes.byref(got))) \
             and got.value == len(data)
 
+    def regions(self):
+        """(base, size, state) of every region of the address space (state 0x10000 free, 0x2000 reserved, 0x1000
+        committed)."""
+        mbi = _MBI()
+        addr = 0
+        while addr < 0x7FFFFFFFFFFF:
+            if not _k32.VirtualQueryEx(self.h, ctypes.c_void_p(addr), ctypes.byref(mbi), ctypes.sizeof(mbi)):
+                break
+            base, size = mbi.BaseAddress or 0, mbi.RegionSize
+            yield base, size, mbi.State
+            addr = base + size
+
     def allocations(self, min_size: int):
         """(allocation base, region size) of committed regions at least min_size long."""
         mbi = _MBI()
@@ -227,6 +249,92 @@ class Guest:
             va += k
             data = data[k:]
         return True
+
+    def u64(self, va: int) -> int | None:
+        raw = self.read(va, 8)
+        return struct.unpack("<Q", raw)[0] if raw else None
+
+    def code_ok(self) -> bool:
+        return self.read(MODULE_BASE + WRITER, len(WRITER_SIG)) == WRITER_SIG
+
+
+# --- Eden (yuzu family) ---------------------------------------------------------------------------------------------
+# Eden maps the guest's address space into one host reservation ("fastmem", on by default): guest address g lives at
+# arena + g. Seen live (Eden 0.2.1, 2026-11-02): the game's module starts exactly at a committed region (one read per
+# region finds it by the save writer's code), but at another guest address than in Ryujinx (0x29B33000, not 0x8504000),
+# and the arena start is not a region boundary. So: find the module, then its guest address M (arena = module host - M).
+# M comes from a slot at the start of the module's data that holds its own guest address (M + 0x263E000 seen live:
+# M = 0x8071A000); if that ever fails, every page-aligned M is tried once (~15 s) until a pointer the module holds
+# (the game state manager) leads to a loaded save. Confirmed live 2026-11-02: clears and rupees read from Eden match
+# the save file.
+MODULE_SPAN = 0x3000000                   # module code + data the client uses (offsets up to 0x2D00000)
+SELF_POINTER = 0x263E000                  # module offset of a slot holding its own guest address
+MODULE_GUEST_MAX = 1 << 32                # module guest addresses tried by the fallback search (page steps)
+_EDEN_CACHE: dict[tuple[int, int], tuple[int, int]] = {}  # (pid, module host) -> (arena, module guest address)
+_EDEN_SEARCHED: set[tuple[int, int, int]] = set()  # (pid, module host, manager pointer) the slow search failed for
+
+
+class FastmemGuest:
+    """Guest-address access through Eden's fastmem arena."""
+
+    def __init__(self, proc: Process, arena: int, module_base: int) -> None:
+        self.p = proc
+        self.arena = arena
+        self.shift = module_base - MODULE_BASE
+
+    @staticmethod
+    def modules(proc: Process) -> list[int]:
+        """Host addresses where the game's module starts (committed regions holding the save writer's code)."""
+        return [base for base, size, state in proc.regions()
+                if state == 0x1000 and size > WRITER + len(WRITER_SIG)
+                and proc.read(base + WRITER, len(WRITER_SIG)) == WRITER_SIG]
+
+    @classmethod
+    def attach(cls, proc: Process, anchor: int, ok) -> "FastmemGuest | None":
+        """anchor: module offset of a pointer into game memory (the state manager); ok(guest): the save reads
+        right. None until the game runs with a save loaded."""
+        for module in cls.modules(proc):
+            cached = _EDEN_CACHE.get((proc.pid, module))
+            if cached:
+                guest = cls(proc, *cached)
+                if ok(guest):
+                    return guest
+            raw = proc.read(module + SELF_POINTER, 8)
+            guess = struct.unpack("<Q", raw)[0] - SELF_POINTER if raw else -1
+            if guess >= 0 and not guess & 0xFFF and guess < 1 << 39:
+                guest = cls(proc, module - guess, guess)
+                if ok(guest):
+                    _EDEN_CACHE[(proc.pid, module)] = (module - guess, guess)
+                    return guest
+            raw = proc.read(module + anchor, 8)
+            pointer = struct.unpack("<Q", raw)[0] if raw else 0
+            if not 0x1000 < pointer < 1 << 39:
+                continue  # title screen: the manager is not set up yet
+            if (proc.pid, module, pointer) in _EDEN_SEARCHED:
+                continue  # searched for this state already: wait for the save to change it
+            _EDEN_SEARCHED.add((proc.pid, module, pointer))
+            for guest_base in range(0, MODULE_GUEST_MAX, 0x1000):
+                arena = module - guest_base
+                if proc.read(arena + pointer, 8) is None:
+                    continue
+                guest = cls(proc, arena, guest_base)
+                if ok(guest):
+                    _EDEN_CACHE[(proc.pid, module)] = (arena, guest_base)
+                    return guest
+        return None
+
+    def host(self, va: int) -> int | None:
+        if MODULE_BASE <= va < MODULE_BASE + MODULE_SPAN:
+            va += self.shift
+        return self.arena + va if 0 <= va < 1 << 39 else None
+
+    def read(self, va: int, n: int) -> bytes | None:
+        h = self.host(va)
+        return self.p.read(h, n) if h is not None else None
+
+    def write(self, va: int, data: bytes) -> bool:
+        h = self.host(va)
+        return h is not None and self.p.write(h, data)
 
     def u64(self, va: int) -> int | None:
         raw = self.read(va, 8)

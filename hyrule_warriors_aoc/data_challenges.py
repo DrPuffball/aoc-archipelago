@@ -630,6 +630,24 @@ def challenge_gate(name: str, by_level: bool, boss_goal: bool = False) -> str | 
 # trapped: Urbosa, and Mipha as soon as she was made playable; the rescue missions do not free them]. So (user rules)
 # Calamity Strikes opens only once all four Champions are yours, and opens Water and Fire / Air and Lightning itself.
 CALAMITY = "Calamity Strikes"
+# Expansion Pass Wave 2 story (Guardian of Remembrance), in the game's order. With include_dlc they count as story
+# missions for the goal and open on the game's own prerequisites (After Calamity Strikes, The Great Plateau and each
+# other), not after the whole story (user, 2026-11-02).
+DLC_STORY_MISSIONS = (
+    "EX To Zelda's Side", "EX Battle of Goponga Village", "EX Battle for Kakariko Village", "EX Searching Hyrule Forest",
+    "EX Liberate the Ancient Lab", "EX The Princess and the King", "EX The Yiga Clan's Retreat",
+    "EX Guardian of Remembrance",
+)
+
+
+def vanilla_prerequisites(name: str) -> list[str]:
+    """Missions and challenges (by name) the game's unlock table requires before this challenge opens."""
+    import struct
+    from .data_save import MISSION_RECORD_IDS, VANILLA_CHALLENGE_UNLOCK
+    names = {r: n for n, ids in MISSION_RECORD_IDS.items() for r in ids}
+    row = VANILLA_CHALLENGE_UNLOCK.get(MISSION_RECORD_IDS[name][0])
+    needs = [r for r in struct.unpack_from("<5H", bytes.fromhex(row)) if r] if row else []
+    return list(dict.fromkeys(names[r] for r in needs if r in names))
 CHAMPIONS = ("Mipha", "Daruk", "Revali", "Urbosa")
 RESCUES = ("Water and Fire", "Air and Lightning")  # opened by Calamity Strikes' clear (not shuffled, no unlock item)
 # Divine Beast battles by Beast (mission parameter byte +79: 0x28 Ruta .. 0x2B Naboris [read live]) -> its Champion
@@ -648,3 +666,16 @@ def champions_needed(name: str) -> tuple[str, ...]:
     heroes = set(MISSION_FORCED_HEROES.get(name, ())) | set(CHALLENGE_BY_NAME[name].required_characters)
     heroes |= {hero for hero, battles in BEAST_BATTLES.items() if name in battles}
     return tuple(h for h in CHAMPIONS if h in heroes)
+
+
+# Challenges the game opens only after quests (unlock table row +0x10..+0x15, tools/RESEARCH.md session 10)
+# [read from data; quest ids -> names from QUEST_STATE_IDS]. Since 0.9.72 they keep that rule: no random opening,
+# and logic and the client need those quests done (user, 2026-11-02: Maz Koshia's trial and the Great Fairies).
+# (The fairy fountains' quest id 356 = Offering Help on the Road: read from the table, not yet seen in game.)
+CHALLENGE_QUEST_PREREQS: dict[str, tuple[str, ...]] = {
+    "Trial of the Ancients": ("The Trial of Monsters", "The Trial of Stones", "The Trial of the Mighty Foe"),
+    "Fairy Fountain: Grassy Plains": ("Offering Help on the Road",),
+    "Fairy Fountain: Deep Snows": ("Offering Help on the Road",),
+    "Fairy Fountain: Desert Sands": ("Offering Help on the Road",),
+    "Fairy Fountain: Battlefield": ("Offering Help on the Road",),
+}
