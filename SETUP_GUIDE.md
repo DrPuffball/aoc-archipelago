@@ -124,4 +124,4 @@ the client doesn't recognise (it is kept, not deleted) · `/goal_banner on|off` 
   takes the DLC out of the goal and sends its checks, so the seed stays winnable; or set include_dlc: false.
 - A few quest rewards are still being mapped: for those, the item opens the quest and you complete it in game for its
   reward (the client tells you which).
-- Eden support is new: please report how it goes.
+- Ryujinx and Eden are both tested in full play (Eden 0.2.1).

@@ -109,5 +109,5 @@ later slot also require completed challenges and quests (slot N needs N x that m
 
 - EX Alerts stay playable but never hold checks (except Forgotten Temple): the game gives each one a monster when it
   appears, which the client can't set yet.
-- Windows only; Ryujinx (Memory Manager Mode Software) or Eden (CPU accuracy Auto). Eden support is new.
+- Windows only; Ryujinx (Memory Manager Mode Software) or Eden (CPU accuracy Auto); both tested in full play.
 - Universal Tracker works with this world without your YAML.

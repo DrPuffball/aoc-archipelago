@@ -119,8 +119,8 @@ HOW THE RANDOMIZER WORKS
 KNOWN LIMITATIONS
 -----------------
 
-- Windows only, game v1.4.1 only. Ryujinx needs Memory Manager Mode Software; Eden needs CPU accuracy Auto. Eden
-  support is new (tested on 0.2.1): please report how it goes.
+- Windows only, game v1.4.1 only. Ryujinx needs Memory Manager Mode Software; Eden needs CPU accuracy Auto. Both are
+  tested in full play (Eden 0.2.1: a whole session of missions, quests, items, DLC and save switching).
 - Remote Bombs is always yours (the game ties it to the Sheikah Slate). Cryonis is an item in logic, but the game
   still gives it outside The Battle of Hyrule Field.
 - The Expansion Pass is on by default (include_dlc): the Guardian of Remembrance missions are story missions, EX
