@@ -45,7 +45,7 @@ from .ryujinx import MODULE_BASE
 
 FIGHT_WINDOW, FIGHT_COUNT = 60.0, 5  # the client rewriting one address this often means the game undoes it
 VERIFY_AFTER = 20.0  # seconds before a one-off client write is checked for having been undone
-ONE_SHOT_WRITERS = {"kill_player", "_request_flow"}
+ONE_SHOT_WRITERS = {"kill_player", "hold_death"}
 # Gifts the player is free to use up (fuse or sell a weapon, spend rupees or materials): a later change is play, not
 # the game undoing the client (user: a fused Extra Weapon was reported as undone).
 PLAYER_USES = {"give_weapon", "add_rupees", "material_bundle", "hearty_meal", "_expect_material"}

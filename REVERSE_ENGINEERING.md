@@ -88,9 +88,22 @@ XP per level and hearts per level come from the game's own table (LinkData2 `007
   (2026-11-02) it read 0 while the controlled hero was record 50 (same kind 9, HP 5200/5200). The client falls back
   to the record of that kind whose (HP, max HP) match the character's display copy. [confirmed layout; fallback
   untested in a live DeathLink]
-- Mission flow: u32 at `[module + 0x2780A80] + 0xB0` (low byte 0 playing, 4 defeated, 12 retry). Writing a request
-  at `+0xB8` (flag byte 2 at `+0xB3`) is taken next frame. 4 then 12 = defeat + retry; 4 alone soft-locks.
-  [confirmed] Divine Beast battles have no defeat screen; the client restores HP if the defeat is never taken.
+- Mission flow: u32 at `[module + 0x2780A80] + 0xB0`, low byte 0 playing, 4 defeated, 12 defeat menu. A natural KO on
+  Eden (2026-11-03): `00 04` playing, `04 04` at the hit, `0C 04` about 2 s later with the menu up, `0C 25` when Retry is
+  picked, then `00 75`, `00 54` playing again. [confirmed]
+- DeathLink: real HP and display copy held at 0; the next hit is a real KO with the death animation and defeat menu,
+  and Retry works. [confirmed on Eden, without the client's other writes running] Forcing requests at `+0xB8` (flag
+  byte 2 at `+0xB3`) is taken next frame but has no animation or menu: 4 then 12 froze on the sepia picture on Eden
+  in both a story and a challenge mission (state stays `0C 04`). Do not use it.
+
+- Instant-KO experiments (Eden, 2026-11-03, none shipped). A recorded KO changes real HP +0x48 to 0 and char `+0x4C`
+  (u32) by +4000 (older notes said u16 = 4000: wrong). Those writes alone: hero stays standing at 0 hearts. With
+  request 4 from play: death animation, controls off; then request 12: sepia, no menu, stuck (byte 1 set to 0x25 or
+  0x54 afterwards, or 0x54 beforehand, changes nothing). With request 4 sent from the pause menu (flow low byte 0x60):
+  animation on unpause, no sepia, then request 12 restarted the mission in 1.1 s (seen once). The defeat menu itself
+  only came from a real hit. Byte 1 read 0x04 on first attempts and 0x54 after a restart. Forced 4 then 12 on an attempt
+  already restarted: animation, sepia, restart in about 1 s (3 of 3); on a first attempt it freezes even with `+0xB1`,
+  `+0xC9` = 0x54 and `+0x120` = 0 set first, so what is missing lies outside this object.
 
 ### Game data tables in memory
 `[[module + 0x2780A38] + field] + 0x60`: `0x698` mission parameters (400 rows), `0x308` mission unlock table
@@ -193,7 +206,9 @@ folder and are not published yet (they expect local game dumps); they are listed
 - DLC (2026-11-02, both waves installed, Eden) [confirmed]: opening EX missions works like base ones (unlock row
   zeroed + the four state lists = 2); EX quests like base quests (quest state 2 + map icon 2). Purah & Robbie (slot 19)
   and Sooga (slot 20) show on the hero list when granted like any hero; the earlier "not shown" result was with Pulse
-  of the Ancients missing. Battle-Tested Guardian = hero slot 18, weapon type `+0x12` = 221 (types step by 10 per slot),
+  of the Ancients missing. Battle-Tested Guardian = hero slot 18, weapon type `+0x12` = 221 (types step by 10 per slot; owned-weapon kinds
+  likewise come in blocks of 10 from each hero's starter kind: 191-193 claymores are King Rhoam's only, 201-202
+  Mipha's, 221-222 Revali's [confirmed by the user in game, 2026-11-03]),
   starter weapon kind 371 (Battle-Tested Screw); granted the same way, it shows and is playable. EX Alerts other
   than Forgotten Temple (the Guardian fight) need a sighting: forced open without one, the mission crashed loading.
 - Save loading [confirmed 2026-11-02, Eden]: the game reads the save file only when it boots. Back at the title screen

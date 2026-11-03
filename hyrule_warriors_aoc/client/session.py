@@ -492,6 +492,10 @@ class Session:
             return []
         return list(group.known[:given_quests(group, self.received_count(item), copies)])
 
+    def has_check(self, name: str) -> bool:
+        """A story mission, challenge, quest or weapon that holds a location in this seed."""
+        return any(name in table for table in self.ids.values())
+
     def received_count(self, item: str) -> int:
         """Copies received of an upgrade-like item; Feature items count once."""
         if item.startswith("Feature: "):

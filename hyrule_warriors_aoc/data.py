@@ -233,19 +233,19 @@ Ancient Overclock Unit | Zelda |
 Sacred Bow | Zelda | 
 Sealing Bow | Zelda | 
 Bow of Light | Zelda | 
-Soldier's Claymore | Link | 
-Knight's Claymore | Link | 
-Royal Claymore | Link | 
-Traveler's Spear | Link | 
-Zora Spear | Link | 
+Soldier's Claymore | King Rhoam | 
+Knight's Claymore | King Rhoam | 
+Royal Claymore | King Rhoam | 
+Traveler's Spear | Mipha | 
+Zora Spear | Mipha | 
 Lightscale Trident | Mipha | 
 Serene Champion's Spear | Mipha | 
 Cobble Crusher | Daruk | 
 Stone Smasher | Daruk | 
 Boulder Breaker | Daruk | 
 Steadfast Champion's Greatsword | Daruk | 
-Traveler's Bow | Link | 
-Soldier's Bow | Link | 
+Traveler's Bow | Revali | 
+Soldier's Bow | Revali | 
 Great Eagle Bow | Revali | 
 Soaring Champion's Bow | Revali | 
 Gerudo Scimitar | Urbosa | 

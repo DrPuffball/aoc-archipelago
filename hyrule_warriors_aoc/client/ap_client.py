@@ -32,8 +32,6 @@ PROBE_LOGGER = "AoCProbe"  # research probe lines (its own client tab when the p
 probe_logger = logging.getLogger(PROBE_LOGGER)
 LEVEL_CAP, LEVEL_CAP_DELAY = 99, 5.0  # hero_level_cap: back to 99 this many seconds after reaching 100
 DEATH_STALE = 8.0  # seconds a received DeathLink waits for a mission in progress before it is dropped
-DEATH_GIVE_UP = 8.0  # seconds after the forced defeat before the client gives up on Retry and undoes the kill
-DEATH_RESTART_DELAY = 3.0  # seconds between the forced defeat (HP 0, controls off) and Retry
 
 NEW_GAME_CONFIRM = 30.0  # seconds a smaller game state must last before it counts as a New Game
 
@@ -49,7 +47,8 @@ STARTER_NOTE = ("This seed skips the forced first mission, but the starter save 
                 "is a New Game, close Age of Calamity in the emulator: the client installs the starter save (backup kept) "
                 "and you then pick Continue. Type /starter_save to force it.")
 
-REFRESH_HINT_SECONDS = 45  # how long the "pause and go back to the map" banner stays after a new seed's setup
+REFRESH_HINT_SECONDS = 20  # how long the "pause and go back to the map" banner stays after a new seed's setup
+DEATH_HOLD_SECONDS = 0.1  # how often a received death re-zeroes the party's health
 TIP_SECONDS = 30  # how long a banner tip (what to do next) stays on the map
 TITLE_HINT_SECONDS = 120  # the game is up but unreadable this long: from "pick Continue" to "see the client window"
 
@@ -258,7 +257,8 @@ class AoCContext(CommonContext):
         self._pending_kill_at = 0.0
         self._cap_seen: dict[str, float] = {}  # hero -> when they were first seen above the level cap
         self._last_hp: float | None = None
-        self._restart_at: float | None = None  # DeathLink: when to request Retry after the forced defeat
+        self._death_hold = False  # DeathLink: a received death holds your HP at 0 until the next hit
+        self._death_hold_task: asyncio.Task | None = None
         self.probe = None
         self._probe_task: asyncio.Task | None = None
         self._open_logged: set[str] = set()
@@ -367,7 +367,7 @@ class AoCContext(CommonContext):
             return
         ignore = self.delivery.baseline(cleared_missions(data) | completed_quests(data) | owned_weapons(data))
         self.save_watcher = SaveWatcher(self.save_path, ignore=ignore, on_ignore_change=self.delivery.set_baseline)
-        if ignore:
+        if ignore and self.save_path not in self.delivery.state.get("starter", {}):  # (a starter save's clears are expected)
             logger.warning("%d clears were already in this save before the seed started; they will NOT count as checks. "
                            "For a full run, start a New Game (back up your save first).", len(ignore))
 
@@ -386,11 +386,11 @@ class AoCContext(CommonContext):
             return
         if (other := self.save_belongs_elsewhere()) and self._game_running():  # another seed's save: hands off
             # (user, 2026-11-02: the note in the client window was easy to miss) stays up until the game is closed
-            self.overlay.set_banner("This save belongs to another seed: close the game, then start it again")
+            self.overlay.set_banner("This save belongs to another seed: close the emulator and wait for the client before reopening")
             if self._elsewhere_noted != other:
                 self._elsewhere_noted = other
                 logger.info("The save in use belongs to seed %s, so the client leaves the game alone. "
-                            "To play this seed, close Age of Calamity: the client switches the save (seed %s's save "
+                            "To play this seed, close the emulator and wait for this window to say the save was set up (seed %s's save "
                             "is kept and comes back when you connect it again).", other, other)
                 self.overlay.show("This save belongs to another seed: close the game to switch")
             if self.live is not None:
@@ -447,7 +447,8 @@ class AoCContext(CommonContext):
             self._live_seen = cleared
             self.delivery.add_progress(cleared - base)
             for name in sorted(new):
-                logger.info("Cleared in game: %s", name)
+                # (clears that hold no check - services open from the start, weapons you own - are detail, not news)
+                (logger if self.session.has_check(name) else probe_logger).info("Cleared in game: %s", name)
                 if self.probe:
                     self.probe.note(f"cleared {name}")
                 await self._on_game_message(message_for(name))
@@ -486,26 +487,26 @@ class AoCContext(CommonContext):
                 try:
                     if self.live.set_mission_rewards(rows) and not self._rewards_logged:
                         self._rewards_logged = True
-                        logger.info("Mission rewards set by the seed (%s).",
+                        probe_logger.info("Mission rewards set by the seed (%s).",
                                     "shuffled" if self.session.mission_rewards.get("mode") == 1 else "none")
                 except HookError as e:  # never let this one feature drop the game connection
                     self._rewards_ok = False
                     logger.warning("Mission rewards stay vanilla: %s", e)
             if self.live.set_reward_bytes(self.session.reward_writes()):
-                logger.info("Quest rewards set from received items.")
+                probe_logger.info("Quest rewards set from received items.")
             states = self.session.quest_states()
             if quests := self.live.set_quest_states(states):
-                logger.info("Services (quest states) set from received items: %s", ", ".join(quests))
+                probe_logger.info("Services (quest states) set from received items: %s", ", ".join(quests))
             done = {q for q, state in states.items() if state == 3} - self.session.store_quests()
             if quests := self.live.set_quest_effects(done):
-                logger.info("Quest effects set in game: %s", ", ".join(quests))
+                probe_logger.info("Quest effects set in game: %s", ", ".join(quests))
             self._show_selection()
             self._show_goal_banner()
             if self._quest_rows_ok and (rows := self.session.quest_rows()):
                 try:
                     if self.live.set_quest_locks(rows) and not self._quest_rows_logged:
                         self._quest_rows_logged = True
-                        logger.info("Quests now open by the seed's rules (random, by completions), not the game's order.")
+                        probe_logger.info("Quests now open by the seed's rules (random, by completions), not the game's order.")
                 except HookError as e:  # never let this one feature drop the game connection
                     self._quest_rows_ok = False
                     logger.warning("Quest unlock rules stay vanilla: %s", e)
@@ -529,7 +530,7 @@ class AoCContext(CommonContext):
                 await self._death_link_tick()
             runes = self.session.rune_flags()
             if runes and (changed := self.live.set_runes(runes)):
-                logger.info("Sheikah Slate: %s", ", ".join(f"{r} {'given' if runes[r] else 'held back'}" for r in changed))
+                probe_logger.info("Sheikah Slate: %s", ", ".join(f"{r} {'given' if runes[r] else 'held back'}" for r in changed))
             # The game's own unlock rules follow the multiworld: only missions the seed has opened can be started.
             opened = cleared | self.session.cleared_missions | set(self.session.available_missions())
             self.live.set_mission_states(opened)  # the map shows the change the next time it is opened
@@ -556,7 +557,7 @@ class AoCContext(CommonContext):
             self._hero_waits_told |= set(waiting)
             if self.live.set_challenge_locks(self.session.challenge_unlocks()) and not self._challenges_logged:
                 self._challenges_logged = True
-                logger.info("Challenges now open by the seed's rules (%s), not the vanilla order.",
+                probe_logger.info("Challenges now open by the seed's rules (%s), not the vanilla order.",
                             "random, by completions" if self.session.side_random else "challenge_logic")
         except (HookError, OSError) as e:
             logger.info("Lost the connection to the game (%s); reconnecting when it is back.", e)
@@ -569,30 +570,37 @@ class AoCContext(CommonContext):
             self.live = None
             self.overlay.set_banner(None)
 
+    async def _hold_death_loop(self) -> None:
+        """A received death holds the party at 0 until the KO, or the mission or attempt ends: a healing item or a hero
+        switched in is wiped within DEATH_HOLD_SECONDS (user, 2026-11-03: healing just wastes the item)."""
+        from .live_hook import HookError
+        try:
+            while self.live is not None and self.live.hold_death():
+                await asyncio.sleep(DEATH_HOLD_SECONDS)
+        except (HookError, OSError) as e:
+            logger.debug("DeathLink hold ended: %s", e)
+
     async def _death_link_tick(self) -> None:
         """Your HP reaching 0 in a mission sends a death; a death from someone else drops your HP to 0."""
-        if self._restart_at is not None:
-            now = time.monotonic()
-            if now >= self._restart_at and self.live.restart_mission():
-                self._restart_at = None
-            elif now > self._restart_at + DEATH_GIVE_UP:
-                self._restart_at = None
-                if self.live.undo_kill():  # the game ignored the defeat (Divine Beast battles): don't leave you at 0 HP
-                    logger.info("DeathLink: this battle has no defeat screen; your health was given back.")
-                    self._audit({"finding": "deathlink", "direction": "undone"})
+        if self._death_hold:
             self._last_hp = 0.0  # our own death from a received link is not sent back
+            if self._death_hold_task is None or self._death_hold_task.done():
+                self._death_hold = False  # the KO landed (defeat menu), or the mission ended
+                self._last_hp = None
             return
         hp = self.live.player_hp()
-        if self._pending_kill and time.monotonic() - self._pending_kill_at > DEATH_STALE:
+        if (self._pending_kill and time.monotonic() - self._pending_kill_at > DEATH_STALE
+                and not self.live.death_can_land()):
             logger.info("DeathLink from %s ignored: you weren't in a mission.", self._pending_kill)
             self._pending_kill = None  # (user rule) a death outside a mission would only kill the next mission's start
         if self._pending_kill and hp is not None and hp > 0:
             if self.live.kill_player():
-                logger.info("DeathLink: %s died, so did you; the mission restarts.", self._pending_kill)
+                logger.info("DeathLink: %s died. Your health is at 0: the next hit defeats you.", self._pending_kill)
                 self.overlay.show(f"DeathLink: {self._pending_kill} died")
                 self._audit({"finding": "deathlink", "direction": "applied", "source": self._pending_kill, "hp_was": hp})
                 self._pending_kill = None
-                self._restart_at = time.monotonic() + DEATH_RESTART_DELAY
+                self._death_hold = True
+                self._death_hold_task = asyncio.create_task(self._hold_death_loop(), name="DeathLink hold")
                 self._last_hp = 0.0
                 return
         if hp is not None and hp <= 0 and (self._last_hp or 0) > 0:
@@ -1078,7 +1086,7 @@ class AoCContext(CommonContext):
                         logger.info("Save shows cleared: %s", m.get("mission") or m.get("challenge"))
                     await self._on_game_message(m)
             if self.live is None and time.time() >= self._starter_check_at:
-                self._starter_check_at = time.time() + 10
+                self._starter_check_at = time.time() + (2 if self.save_belongs_elsewhere() else 10)  # (a quick reopen must not miss it)
                 self._follow_emulator()
                 self.maybe_install_starter()
                 self.sync_saves()
@@ -1255,7 +1263,7 @@ class AoCContext(CommonContext):
                 logger.info("New seed set up: open the pause menu and go back to the map once, so the Smithy, the "
                             "Training Camp and every opened icon show up.")
             if time.monotonic() < self._refresh_until:
-                self.overlay.set_banner("New seed: pause and go back to the map once so everything appears")
+                self.overlay.set_banner("New seed: pause and go back to the map once so everything appears (this note clears by itself)")
                 return
             self._refresh_hint = False
         if getattr(self, "_banner_tip", None) and not in_battle:

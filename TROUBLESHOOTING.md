@@ -14,8 +14,8 @@ The game only reads its save when it boots, so the client can only switch saves 
 ## Common problems
 
 **A banner says "This save belongs to another seed".**
-The game loaded the save of a different seed (or a save the client doesn't know). Close the game; the client
-switches to this seed's save as soon as it is closed; then start the game again. If the client says it won't replace
+The game loaded the save of a different seed (or a save the client doesn't know). Close the emulator and wait until the
+client says the save was set up (about 10 seconds), then start the game again. If the client says it won't replace
 a save with progress it can't place, type `/starter_save` (that save is kept in `%USERPROFILE%\AoC_Archipelago\saves`).
 
 **The Smithy, the Training Camp or new icons are missing on the map.**
@@ -44,6 +44,10 @@ out of the goal and sends its checks, so the seed stays winnable.
 **An EX Alert won't hold a check / can't be opened early.**
 That's expected: the game gives each Alert its monster when it appears, which the client can't do yet. Alerts appear
 and play as in the normal game (Forgotten Temple, the Battle-Tested Guardian fight, is a normal check).
+
+**DeathLink: my health went to 0 but I'm still alive.**
+That's expected: a received death holds your health at 0 until your next hit, which brings up the defeat menu.
+Healing and switching heroes won't save you. Leaving the mission or restarting it from the pause menu ends it.
 
 **Switching between Ryujinx and Eden.**
 Start the game once in the other emulator, close it, and type `/sync_saves`. After that the client keeps both copies

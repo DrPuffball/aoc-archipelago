@@ -43,11 +43,13 @@ BATTLE_PLAYER, BATTLE_CHARACTER, CHAR_HP, CHAR_HP_MAX = 0x30, 0x8, 0x28, 0x2C
 UNITS, UNITS_TABLE, UNIT_COUNT = MODULE_BASE + 0x2780A80, 0x8, MODULE_BASE + 0x277DE3C
 UNIT_RECORDS, UNIT_SIZE, UNIT_HP = 0x176E70, 0x6C, 0x44
 # HP 0 alone never KOs (the game checks it only when a hit lands). The mission flow state is a u32 at
-# [module + 0x2780A80] + 0xB0 (low byte: 0 = playing, 4 = defeated, 12 = retry); a request posted at +0xB8 (with flag
-# byte 2 at +0xB3, as the game does) is taken on the next frame. Posting 4 then 12 restarts the mission like a defeat
-# + Retry; 4 alone soft-locks (no death animation, so no defeat screen) [both confirmed in game 2026-10-27].
-FLOW_STATE, FLOW_FLAGS, FLOW_REQUEST = 0xB0, 0xB3, 0xB8
-FLOW_PLAYING, FLOW_DEFEATED, FLOW_RETRY = 0, 4, 12
+# [module + 0x2780A80] + 0xB0 (low byte: 0 = playing, 0x60 = pause menu [seen on Eden], 4 = defeated, 12 = defeat menu).
+FLOW_STATE, FLOW_REQUEST = 0xB0, 0xB8
+FLOW_PLAYING = 0
+FLOW_OVER = (4, 12)
+FLOW_CLOCK = 0x128  # counts up during an attempt (frames at half rate); starts over on a restart [seen on Eden]
+# (Party heroes: character objects 0x6D0 apart, +0x0 = party index. A benched hero's display HP is restored by the game
+# every frame, so a received death reaches each hero when they are switched in [Eden, 2026-11-03].)
 REWARD_SEARCH = 64 << 20  # how far from the parameter table the reward table may sit
 LOCK_RECORD = 28  # The Future of Hyrule: a locked mission is made to require it, which nothing clears in time
 # Per-mission states the map draws from (one byte per mission record): profile +0x876 (saved copy +3*0xC30) and
@@ -762,47 +764,40 @@ class LiveGame:
         state, _, request = struct.unpack("<III", raw)
         return flow, state & 0xFF, request
 
-    def _request_flow(self, flow: int, state: int) -> None:
-        self._write(flow + FLOW_FLAGS, b"\x02")
-        self._write(flow + FLOW_REQUEST, struct.pack("<I", state))
-
     def kill_player(self) -> bool:
-        """DeathLink: real HP (and the display copy) to 0 and the mission flow to "defeated"; restart_mission must
-        follow a few seconds later. Returns False outside play (no character, real HP not found, or not playing)."""
+        """DeathLink: real HP (and the display copy) to 0, held by hold_death: the next hit is then a real KO, with the
+        game's own death animation and defeat menu (Eden, 2026-11-03). Forcing the flow states instead froze the game
+        on the defeat picture. Returns False outside play (no character, real HP not found, or not playing)."""
         char = self._battle_character()
         real = self._unit_hp(char) if char else None
         flow = self._flow()
         if not real or not flow or flow[1:] != (FLOW_PLAYING, 0):
             return False
-        self._kill_undo = (real, self.g.read(real, 4), char + CHAR_HP, self.g.read(char + CHAR_HP, 4), flow[0])
         self._write(real, struct.pack("<f", 0.0))
         self._write(char + CHAR_HP, struct.pack("<f", 0.0))
-        self._request_flow(flow[0], FLOW_DEFEATED)
+        self._hold_clock = struct.unpack("<I", self.g.read(flow[0] + FLOW_CLOCK, 4))[0]
         return True
 
-    def undo_kill(self) -> bool:
-        """The game never took the "defeated" request (seen in a Divine Beast battle: 0 HP, no defeat screen, a
-        softlock): give the HP back and withdraw the request, so play goes on. [guess: untested in game]"""
-        undo = getattr(self, "_kill_undo", None)
-        self._kill_undo = None
-        if not undo:
-            return False
-        real, real_hp, shown, shown_hp, flow = undo
-        if real_hp:
-            self._write(real, real_hp)
-        if shown_hp:
-            self._write(shown, shown_hp)
-        self._write(flow + FLOW_REQUEST, struct.pack("<I", 0))
-        return True
-
-    def restart_mission(self) -> bool:
-        """After kill_player: request Retry (the mission restarts). True once requested, or if no longer defeated."""
+    def death_can_land(self) -> bool:
+        """In a mission and not already defeated (a pause menu counts: a received death waits for it to close)."""
         flow = self._flow()
-        if not flow or flow[2]:
-            return False  # unreadable, or a request (ours) not taken yet
-        if flow[1] != FLOW_DEFEATED:
-            return True
-        self._request_flow(flow[0], FLOW_RETRY)
+        return self._battle_character() is not None and bool(flow) and flow[1] not in FLOW_OVER
+
+    def hold_death(self) -> bool:
+        """After kill_player: keep the party at 0 HP until the hit lands, whoever you switch to (a hero switched in shows
+        their health for up to a tick). False once it is over: the game left play (the KO), the mission ended, or the
+        attempt's clock went back (a restart from the pause menu)."""
+        char = self._battle_character()
+        real = self._unit_hp(char) if char else None
+        flow = self._flow()
+        if not real or not flow or flow[1] in FLOW_OVER:  # (a pause menu keeps the hold)
+            return False
+        clock = struct.unpack("<I", self.g.read(flow[0] + FLOW_CLOCK, 4))[0]
+        if clock < getattr(self, "_hold_clock", 0):
+            return False
+        self._hold_clock = clock
+        self._write(char + CHAR_HP, struct.pack("<f", 0.0))
+        self._write(real, struct.pack("<f", 0.0))
         return True
 
     def reward_table(self) -> int:

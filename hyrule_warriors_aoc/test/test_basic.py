@@ -565,3 +565,28 @@ class TestDlcStoryItems(AoCTestBase):
         state = self.multiworld.get_all_state(False)
         state.prog_items[self.player]["Unlock: EX To Zelda's Side"] = 0
         self.assertFalse(self.world.get_location("Event: Challenge EX To Zelda's Side").can_reach(state))
+
+
+class TestWeaponOwners(AoCTestBase):
+    """Weapon kinds come in blocks of 10 per hero, starting at the hero's starter kind (game data): the claymores,
+    Traveler's / Zora Spear and Traveler's / Soldier's Bow were filed under Link until 0.9.79 (user, 2026-11-03:
+    the three claymores are King Rhoam's alone)."""
+
+    def test_starter_blocks(self) -> None:
+        from ..data import WEAPONS
+        from ..data_save import HERO_STARTER_KIND, WEAPON_KINDS
+        owner = {w.name: w.character for w in WEAPONS}
+        for name in ("Soldier's Claymore", "Knight's Claymore", "Royal Claymore"):
+            self.assertEqual(owner[name], "King Rhoam")
+        # every weapon: its kinds sit in its hero's block (as in a 100% save, RESEARCH: Link 1-170 and the DLC flails
+        # 351-353, Zelda 171-190 and the DLC Master Cycles 361-363, every other hero 10 from their starter kind)
+        def hero_of(kind: int) -> str:
+            if kind <= 170 or 351 <= kind <= 360:
+                return "Link"
+            if kind <= 190 or 361 <= kind <= 370:
+                return "Zelda"
+            return next(h for h, k in HERO_STARTER_KIND.items() if k <= kind < k + 10 and h not in ("Link", "Zelda"))
+        for name, kinds in WEAPON_KINDS.items():
+            if name in owner:
+                self.assertEqual({hero_of(k) for k in kinds}, {owner[name]}, name)
+        self.assertEqual(set(owner), set(WEAPON_KINDS) & set(owner))

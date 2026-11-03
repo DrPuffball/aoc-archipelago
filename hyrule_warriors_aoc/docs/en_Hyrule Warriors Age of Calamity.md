@@ -81,8 +81,8 @@ on level clears, spread evenly (bonus checks sent with each clear); recipes are 
 
 There are no traps. With `steady_rewards` (on by default) story mission clears never hold your own filler.
 `hero_level_cap` keeps heroes at 99 (they still level up and refill). With `death_link` on, your hero's HP reaching 0
-in a mission is sent to the others, and a death from someone else restarts your mission; deaths that arrive while
-you're not in a mission are ignored.
+in a mission is sent to the others, and a death from someone else drops your health to 0 until your next hit, which brings up the
+defeat menu (healing and switching heroes won't save you); deaths that arrive while you're not in a mission are ignored.
 
 ## Side content
 

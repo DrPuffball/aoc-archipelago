@@ -887,17 +887,28 @@ class DeathLinkHookTests(unittest.TestCase):
         self.assertEqual(game.player_hp(), 0.0)
         self.assertEqual(struct.unpack("<f", fake.read(record + H.UNIT_HP, 4))[0], 0.0)
         self.assertEqual(struct.unpack("<f", fake.read(char + H.CHAR_HP, 4))[0], 0.0)
-        self.assertEqual(struct.unpack("<I", fake.read(holder + H.FLOW_REQUEST, 4))[0], H.FLOW_DEFEATED)
-        self.assertEqual(fake.read(holder + H.FLOW_FLAGS, 1), b"\x02")
-        fake.put(record + H.UNIT_HP, struct.pack("<f", 1900.0))
-        self.assertFalse(game.kill_player())  # a request is pending: not playing
-        self.assertFalse(game.restart_mission())  # not taken yet
-        fake.put(holder + H.FLOW_STATE, struct.pack("<III", 0x02005404, 0, 0))  # the game took it: defeated
+        self.assertEqual(struct.unpack("<I", fake.read(holder + H.FLOW_REQUEST, 4))[0], 0)  # no forced flow state
+        fake.put(record + H.UNIT_HP, struct.pack("<f", 50.0))  # healed a little: back to 0 until the hit lands
+        fake.put(char + H.CHAR_HP, struct.pack("<f", 50.0))
+        self.assertTrue(game.hold_death())
+        self.assertEqual(game.player_hp(), 0.0)
+        self.assertEqual(struct.unpack("<f", fake.read(char + H.CHAR_HP, 4))[0], 0.0)
+        fake.put(holder + H.FLOW_STATE, struct.pack("<III", 0x5460, 0, 0))  # pause menu: the hold goes on
+        self.assertTrue(game.hold_death())
+        self.assertFalse(game.kill_player())  # a new death waits for play ...
+        self.assertTrue(game.death_can_land())  # ... and isn't dropped
+        fake.put(holder + H.FLOW_STATE, struct.pack("<III", 0x02005404, 0, 0))  # the KO: defeated
+        self.assertFalse(game.death_can_land())
+        self.assertFalse(game.hold_death())
         self.assertFalse(game.kill_player())
-        self.assertTrue(game.restart_mission())
-        self.assertEqual(struct.unpack("<I", fake.read(holder + H.FLOW_REQUEST, 4))[0], H.FLOW_RETRY)
-        fake.put(holder + H.FLOW_STATE, struct.pack("<III", 0x5400, 0, 0))  # back to playing
-        self.assertTrue(game.restart_mission())  # nothing left to do
+        fake.put(holder + H.FLOW_STATE, struct.pack("<III", 0x5400, 0, 0))
+        fake.put(holder + H.FLOW_CLOCK, struct.pack("<I", 500))
+        fake.put(char + H.CHAR_HP, struct.pack("<f", 2000.0))  # a full hero switched in: still held
+        self.assertTrue(game.hold_death())
+        self.assertEqual(struct.unpack("<f", fake.read(char + H.CHAR_HP, 4))[0], 0.0)
+        fake.put(holder + H.FLOW_CLOCK, struct.pack("<I", 20))  # restarted from the pause menu: the clock went back
+        self.assertFalse(game.hold_death())
+        fake.put(char + H.CHAR_HP, struct.pack("<f", 0.0))
         fake.put(record + H.UNIT_HP, struct.pack("<f", 0.0))
         fake.put(record + H.UNIT_HP, struct.pack("<f", 1900.0))
         fake.put(record, struct.pack("<II", 1, 18))  # another kind in that slot: not ours
