@@ -534,7 +534,7 @@ class QuestStateTests(unittest.TestCase):
 
     def test_every_quest_has_a_state_entry(self) -> None:
         from ..data_quests import QUESTS
-        self.assertEqual({q.name for q in QUESTS}, set(L.QUEST_STATE_IDS))
+        self.assertEqual({q.name for q in QUESTS} | {"EX Ancient Tech Lab"}, set(L.QUEST_STATE_IDS))  # (+ the lab's service)
         self.assertEqual(len(set(L.QUEST_STATE_IDS.values())), len(L.QUEST_STATE_IDS))
         self.assertLess(max(L.QUEST_STATE_IDS.values()), L.QUEST_STATE_COUNT)
 

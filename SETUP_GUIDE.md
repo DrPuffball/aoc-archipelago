@@ -40,9 +40,10 @@ most people change:
 - `challenge_checks`, `quest_checks`, `weapon_checks`: which side content holds checks (default: challenges and
   quests on, weapons off).
 - `challenge_unlock_order`, `quest_unlock_order`: randomized (a few open, 2-4 more after each completion) or vanilla.
-- `mission_unlocks`: `items` = each story mission opens with its own item from the multiworld.
-- `goal_story_missions`, `goal_challenges`: what the goal needs. With `final_mission_goal` (on), The Future of Hyrule
-  opens once you have those and clearing it wins.
+- `mission_unlocks`: `items` (default) = each story mission opens with its own item from the multiworld (you start
+  with 2, hinted for free); `story_order` = in order. `first_mission` (default any) picks the starting ones.
+- `goal_story_missions`, `goal_challenges`: what the goal needs (default 20 of the 28 story missions and 25
+  challenges). With `final_mission_goal` (on), The Future of Hyrule opens once you have those and clearing it wins.
 - `game_mode`: `standard`, `story_only` (every check on story missions, each clear opens the next) or
   `challenges_only` (every check on challenges; no story missions or map quests).
 - `difficulty_checks` (extra checks for harder clears) or `difficulty_lock` (clears below a difficulty don't count).
@@ -126,6 +127,6 @@ The full guide is `TROUBLESHOOTING.md`. The most common ones:
   challenges and quests hold checks, and Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts
   stay playable but never hold checks (except Forgotten Temple). Without the DLC in your emulator, the client
   takes the DLC out of the goal and sends its checks, so the seed stays winnable; or set include_dlc: false.
-- A few quest rewards are still being mapped: for those, the item opens the quest and you complete it in game for its
+- A few quest rewards (research quests, Maz Koshia's trials and the Expansion Pass reward quests) still open their quest: the item opens it and you complete it in game for its
   reward (the client tells you which).
 - Ryujinx and Eden are both tested in full play (Eden 0.2.1).

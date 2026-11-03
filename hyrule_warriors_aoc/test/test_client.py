@@ -9,9 +9,16 @@ from ..client.session import Session
 from ..data import MISSIONS, WEAPONS
 
 
+
+# The defaults before the 2026-11-02 default-run review (story order, no challenge goal, all 28 story missions, early
+# first mission, vanilla mission order, no free hints, Terrako Guardian locked): tests of that behaviour pin them.
+CLASSIC = {"mission_unlocks": "story_order", "goal_challenges": 0, "goal_story_missions": 28, "first_mission": "random_early",
+           "mission_order": "vanilla", "hint_mission_unlocks": False, "hint_heroes": False,
+           "locked_features": ["Terrako Guardian"]}
+
 class SessionTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"first_mission": "vanilla", "side_content": ["Weapons", "Challenges", "Quests"], "weapon_check_logic": "after_character",
+    options = {**CLASSIC, "first_mission": "vanilla", "side_content": ["Weapons", "Challenges", "Quests"], "weapon_check_logic": "after_character",
                "include_dlc": False}  # the base story's flow
 
     def make_session(self) -> Session:
@@ -67,7 +74,7 @@ class SessionTests(WorldTestBase):
 
 class SessionExtrasTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"mission_hint_every": 2, "side_content": ["Challenges"], "include_dlc": False,
+    options = {**CLASSIC, "mission_hint_every": 2, "side_content": ["Challenges"], "include_dlc": False,
                "featured_challenge": True}
 
     def make_session(self) -> Session:
@@ -121,7 +128,7 @@ class RescueTests(WorldTestBase):
 
 class SessionSideGateTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"side_content": ["Challenges", "Quests"], "challenge_logic": "by_level", "side_missions_per_unlock": 2}
+    options = {**CLASSIC, "side_content": ["Challenges", "Quests"], "challenge_logic": "by_level", "side_missions_per_unlock": 2}
 
     def test_story_waits_for_side_missions(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
@@ -250,7 +257,7 @@ class ChallengeUnlockTests(WorldTestBase):
 
 class ChallengeUnlockByLevelTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"side_unlocks": "game_rules", "side_content": ["Challenges"], "challenge_logic": "by_level", "mission_order": "shuffle_all",
+    options = {**CLASSIC, "side_unlocks": "game_rules", "side_content": ["Challenges"], "challenge_logic": "by_level", "mission_order": "shuffle_all",
                "locked_features": []}
 
     def test_rows_require_the_logic_gate(self) -> None:
@@ -638,7 +645,7 @@ class FeatureItemTests(WorldTestBase):
 
 class DifficultyGoalTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"goal_difficulty": "hard"}
+    options = {**CLASSIC, "goal_difficulty": "hard"}
 
     def test_goal_waits_for_hard_clears(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
@@ -666,7 +673,7 @@ class DifficultyGoalTests(WorldTestBase):
 
 class ShortGoalTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"goal_story_missions": 5, "final_mission_goal": False, "include_dlc": False}
+    options = {**CLASSIC, "goal_story_missions": 5, "final_mission_goal": False, "include_dlc": False}
 
     def test_goal_after_five_story_clears(self) -> None:
         from ..regions import STORY_EVENT, VICTORY_EVENT, cleared_event
@@ -1181,7 +1188,7 @@ class EffectAuditTests(unittest.TestCase):
 class FirstMissionTests(WorldTestBase):
     """first_mission random_early (default): a chapter 1-2 mission first; Hyrule Field gets an unlock item."""
     game = "Hyrule Warriors Age of Calamity"
-    options = {"mission_unlocks": "items", "starting_mission_unlocks": 2}
+    options = {"mission_unlocks": "items", "starting_mission_unlocks": 2, "first_mission": "random_early"}
 
     def test_hyrule_field_first_then_a_random_early_mission(self) -> None:
         order = self.world.mission_order

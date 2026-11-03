@@ -22,8 +22,9 @@ from typing import NamedTuple
 
 # Blocks off the save manager P = [module + 0x2780A48]: field -> distance to its saved copy (read from live memory:
 # every survey byte holds the same value at both places).
-PROFILE, FLAGS, RESEARCH = 0x588, 0x5A0, 0x578
-BLOCK_SAVED_COPY = {PROFILE: 3 * 0xC30, FLAGS: 0x19B0, RESEARCH: 0x790}
+PROFILE, FLAGS, RESEARCH, WARDROBE = 0x588, 0x5A0, 0x578, 0x570
+# WARDROBE: outfits and dye colours ([P+0x570]; its saved copy found at +0xA890 by the dye flags, 2026-11-02)
+BLOCK_SAVED_COPY = {PROFILE: 3 * 0xC30, FLAGS: 0x19B0, RESEARCH: 0x790, WARDROBE: 0xA890}
 
 Write = tuple[int, int, int]  # (block, offset, value)
 
@@ -65,9 +66,19 @@ RECIPES = {  # Progressive Recipe's quests in vanilla order -> recipe number (qu
 # Marita Exchange) shares 0x5D9/0x5DD, so the Great Bridge Repairs item forcing them to its own count (0 or 1) undid the
 # other three quests' discounts (Marita's hand-in vanished the same instant). The client adds the type's quests that
 # no active store group holds to whatever a group forces here.
+TYPE_19 = ("Great Bridge Repairs", "What Bad Weather?", "The Lazy Guards", "The Marita Exchange")
+TYPE_18 = ("Lighting the Way", "Floria Bridge Protection", "Rebuilding Akkala Bridge", "Goods on the Move in Hyrule!")
+# Counters the game keeps per quest type, shared by quests of different reward groups (hand-ins 2026-11-02:
+# Shiny New Tools raised the forging-discount counter Quarry Recruiting uses, Tales of the Molten Forge the fusion one
+# Off to the Hot Springs uses, The Legendary Blacksmith the weapon-cap one A Monumental Undertaking uses). The client
+# sets each to the number of its quests rewarded: by a received item, or (no item holds it) handed in.
 SHARED_COUNTERS: dict[tuple[int, int], tuple[str, ...]] = {
-    (FLAGS, offset): ("Great Bridge Repairs", "What Bad Weather?", "The Lazy Guards", "The Marita Exchange")
-    for offset in (0x5D9, 0x5DD)}
+    **{(FLAGS, offset): TYPE_19 for offset in (0x5D9, 0x5DD)},
+    **{(FLAGS, offset): TYPE_18 for offset in (0x5DA, 0x5DB, 0x5DC, 0x5DE)},
+    (FLAGS, 0x5E0): ("Quarry Recruiting", "Shiny New Tools"),
+    (FLAGS, 0x63E): ("Off to the Hot Springs", "Tales of the Molten Forge"),
+    (FLAGS, 0x63F): ("A Monumental Undertaking", "The Legendary Blacksmith"),
+}
 
 
 def _counter(offset: int, n: int) -> tuple[tuple[Write, ...], ...]:
@@ -126,11 +137,20 @@ REWARD_GROUPS: list[RewardGroup] = [
                  "Anything but Bugs", "Hoping for Heat Relief")),
     # "unlock" groups: the reward's address is unknown, so the quest itself is the lock. The client keeps it hidden
     # until its item (share) arrives, then opens it; completing it gives the game's own reward and sends its check.
-    RewardGroup("Progressive Regional Discount", "unlock",
+    # 0.9.77: direct rewards (were "unlock" groups). Discounts: the type's counters (SHARED_COUNTERS; confirmed with
+    # Rebuilding Akkala Bridge and The Marita Exchange).
+    RewardGroup("Progressive Regional Discount", "store",
                 ("Lighting the Way", "What Bad Weather?", "Floria Bridge Protection", "The Marita Exchange",
-                 "Rebuilding Akkala Bridge", "Goods on the Move in Hyrule!", "The Lazy Guards")),
-    RewardGroup("Progressive Blacksmith Upgrade", "unlock",
-                ("Shiny New Tools", "Road to Rust Research", "Tales of the Molten Forge", "The Legendary Blacksmith")),
+                 "Rebuilding Akkala Bridge", "Goods on the Move in Hyrule!", "The Lazy Guards"),
+                tuple(tuple((FLAGS, o, 1) for o in ((0x5D9, 0x5DD) if q in TYPE_19 else (0x5DA, 0x5DB, 0x5DC, 0x5DE)))
+                      for q in ("Lighting the Way", "What Bad Weather?", "Floria Bridge Protection",
+                                "The Marita Exchange", "Rebuilding Akkala Bridge", "Goods on the Move in Hyrule!",
+                                "The Lazy Guards"))),
+    # Smithy upgrades [hand-ins 2026-11-02]: forging discount, rust removal, fusion success, max weapon level 30.
+    RewardGroup("Progressive Blacksmith Upgrade", "store",
+                ("Shiny New Tools", "Road to Rust Research", "Tales of the Molten Forge", "The Legendary Blacksmith"),
+                (((FLAGS, 0x5E0, 1),), ((FLAGS, 0x641, 1),), ((FLAGS, 0x63E, 1),),
+                 ((FLAGS, 0x63F, 1), (FLAGS, 0x651, 1), (FLAGS, 0x65C, 1)))),
     # Sheikah Sensor (0.9.73: store). Needed: Researchers! turns it on (profile 0xC7B [read: its hand-in]); the type-30
     # quests set three research levels to the values in their quest-table row (+0x34..+0x36; Feed the Research 1/1/1
     # matches its hand-in) [read from the quest table]. Until 0.9.73 the client undid Sweeten the Research's levels
@@ -140,9 +160,14 @@ REWARD_GROUPS: list[RewardGroup] = [
                 (((PROFILE, 0xC7B, 1),),
                  ((RESEARCH, 0x780, 3), (RESEARCH, 0x781, 3), (RESEARCH, 0x783, 2)),
                  ((RESEARCH, 0x780, 4), (RESEARCH, 0x781, 4), (RESEARCH, 0x783, 2)))),
-    RewardGroup("Progressive Training Camp Lesson", "unlock", ("Facing Powerful Enemies", "The Instructor's Problem")),
-    RewardGroup("Progressive Cooking Lesson", "unlock",
-                ("Snowbound Cook", "Master Monster Roasts", "Expert Cooking Lesson", "The Master Chef")),
+    # Lessons [hand-ins 2026-11-02]: a counter each (Training Camp 0x642: 1, 2; cooking 0x643: 1, 2, 3); The Master
+    # Chef sets its own flags.
+    RewardGroup("Progressive Training Camp Lesson", "store", ("Facing Powerful Enemies", "The Instructor's Problem"),
+                (((FLAGS, 0x642, 1),), ((FLAGS, 0x642, 2),))),
+    RewardGroup("Progressive Cooking Lesson", "store",
+                ("Snowbound Cook", "Master Monster Roasts", "Expert Cooking Lesson", "The Master Chef"),
+                (((FLAGS, 0x643, 1),), ((FLAGS, 0x643, 2),), ((FLAGS, 0x643, 3), (PROFILE, 0x2D8, 1)),
+                 ((FLAGS, 0x65B, 1), (FLAGS, 0x70E, 3), (FLAGS, 0x713, 5)))),
     # Type 34 recipes (0.9.73: store). Each quest's row (+0x38) names its recipe; the recipe is known when
     # profile + RECIPE_BASE + that number is 1 [read from the quest table; matches all 19 recipes seen handed in].
     RewardGroup("Progressive Recipe", "store", tuple(RECIPES),
@@ -159,9 +184,13 @@ REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Progressive Divine Beast Upgrade", "store",
                 ("Regulating the Reservoir", "Surveying the Volcano", "Revitalize Those in the Skies",
                  "Patrolling the Desert"), tuple(((PROFILE, 0x871 + n, 1),) for n in range(1, 5))),
-    RewardGroup("Progressive Dye Colors", "unlock",
-                ("A Sparkling Solution", "Custom-Made Color", "A Color Seen in a Dream")),
-    RewardGroup("Apple Capacity Up", "unlock", ("The Korok Ballet",)),
+    # Dyes [hand-ins 2026-11-02]: 2, 3 and 5 colour flags in a row in the wardrobe block; apple capacity one flag.
+    RewardGroup("Progressive Dye Colors", "store",
+                ("A Sparkling Solution", "Custom-Made Color", "A Color Seen in a Dream"),
+                (tuple((WARDROBE, o, 1) for o in range(0x2D6E, 0x2D70)),
+                 tuple((WARDROBE, o, 1) for o in range(0x2D70, 0x2D73)),
+                 tuple((WARDROBE, o, 1) for o in range(0x2D73, 0x2D78)))),
+    RewardGroup("Apple Capacity Up", "store", ("The Korok Ballet",), (((PROFILE, 0xC0B, 1),),)),
     RewardGroup("Progressive Region Hope", "unlock",
                 ("The Hope of Central Hyrule", "The Hope of Hebra", "The Hope of Akkala", "The Hope of Eldin",
                  "The Hope of Lanayru", "The Hope of Necluda", "The Hope of Faron", "The Hope of Gerudo")),

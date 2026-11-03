@@ -123,7 +123,7 @@ class MissionOrder(Choice):
     option_vanilla = 0
     option_shuffle_within_chapter = 1
     option_shuffle_all = 2
-    default = option_vanilla
+    default = option_shuffle_all  # (user, 2026-11-02)
 
 
 class FirstMission(Choice):
@@ -140,7 +140,7 @@ class FirstMission(Choice):
     option_vanilla = 0
     option_random_early = 1
     option_random_any = 2
-    default = option_random_early
+    default = option_random_any  # (user, 2026-11-02)
 
 
 class MissionUnlocks(Choice):
@@ -156,7 +156,7 @@ class MissionUnlocks(Choice):
     display_name = "Mission Unlocks"
     option_story_order = 0
     option_items = 1
-    default = option_story_order
+    default = option_items  # (user, 2026-11-02: default run review)
 
 
 class StartingMissionUnlocks(Range):
@@ -269,7 +269,7 @@ class GoalStoryMissions(Range):
     display_name = "Goal Story Missions"
     range_start = 2
     range_end = 28
-    default = 28
+    default = 20  # (user, 2026-11-02: default run review)
 
 
 class GoalChallenges(Range):
@@ -281,7 +281,7 @@ class GoalChallenges(Range):
     display_name = "Goal Challenges"
     range_start = 0
     range_end = 168  # the base game's challenges (no Expansion Pass), so the goal is always reachable
-    default = 0
+    default = 25  # (user, 2026-11-02: default run review)
 
 
 class DifficultyChecks(Choice):
@@ -361,7 +361,7 @@ class LockedFeatures(OptionSet):
 
     display_name = "Locked Features"
     valid_keys = frozenset(LOCKABLE_FEATURES)
-    default = frozenset({"Terrako Guardian"})  # cooking is open from the start unless locked here (user, 2026-11-02)
+    default = frozenset({"Terrako Guardian", "Fairy Fountains"})  # cooking is open from the start unless locked here (user, 2026-11-02)
 
 
 class SheikahRunes(Choice):
@@ -462,7 +462,7 @@ class StuckRescueMinutes(Range):
     display_name = "Stuck Rescue Minutes"
     range_start = 0
     range_end = 180
-    default = 45
+    default = 30  # (user, 2026-11-02: default run review)
 
 
 
@@ -692,7 +692,7 @@ class QuestRewardItems(OptionCounter):
                for g in REWARD_GROUPS}
 
 
-class HintMissionUnlocks(Toggle):
+class HintMissionUnlocks(DefaultOnToggle):
     """
     Every story mission unlock item (mission_unlocks: items) is hinted for free when the room starts, so you can see
     where each mission's unlock is. Off: find them the normal way.
@@ -701,7 +701,7 @@ class HintMissionUnlocks(Toggle):
     display_name = "Auto-Hint Mission Unlocks"
 
 
-class HintHeroes(Toggle):
+class HintHeroes(DefaultOnToggle):
     """Every hero (Character item) you can receive is hinted for free when the room starts."""
 
     display_name = "Auto-Hint Heroes"

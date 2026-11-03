@@ -1335,6 +1335,7 @@ QUEST_STATE_IDS = {
     'EX Trial of Kema Kosassa': 481,
     'EX Relic Lessons': 482,
     'EX Violent Obsessions': 483,
+    'EX Ancient Tech Lab': 425,  # (unnamed in the game's list: the lab's service quest)
 }
 
 # Combo upgrades: 28 levels (one byte each) at profile [P+0x588] + 0x73B (copy 3 at +3*0xC30); save 0x2C014.

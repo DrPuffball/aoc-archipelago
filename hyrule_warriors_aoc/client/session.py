@@ -449,14 +449,18 @@ class Session:
                 values[key] = max(values.get(key, 0), value)
 
         active = set()
+        given: set[str] = set()  # quests whose reward an item (or an option) gives
         for item, copies in self.reward_copies.items():
             group = ALL_GROUPS.get(item)
             if group and group.kind == "store" and copies:
                 active.add(item)
-                merge(reward_writes(group, given_quests(group, self.received_count(item), copies)))
+                n = given_quests(group, self.received_count(item), copies)
+                given |= set(group.known[:n])
+                merge(reward_writes(group, n))
         for item, count in self.pre_granted.items():  # given in full from the start (options)
             if item in ALL_GROUPS:
                 active.add(item)
+                given |= set(ALL_GROUPS[item].known[:count])
                 merge(reward_writes(ALL_GROUPS[item], count))
         # A quest of a group the seed leaves vanilla keeps the reward the game gave for it, even on a byte an item
         # group forces (Sweeten the Research's sensor levels share bytes with Feed the Research).
@@ -468,9 +472,9 @@ class Session:
                 if quest in done:
                     merge({(b, o): v for b, o, v in group.writes[i] if (b, o) in values})
         held = {q for item in active for q in ALL_GROUPS[item].known}
-        for key, quests in SHARED_COUNTERS.items():  # a counter of every quest of its type: add the free ones
-            if key in values:
-                values[key] += sum(1 for q in quests if q in done and q not in held)
+        for key, quests in SHARED_COUNTERS.items():  # a counter of every quest of its type, whatever its group
+            if key in values:  # (rewarded by an item, or handed in where no item holds it)
+                values[key] = sum(1 for q in quests if q in given or (q in done and q not in held))
         return values
 
     def store_quests(self) -> set[str]:

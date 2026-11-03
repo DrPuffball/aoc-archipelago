@@ -61,7 +61,7 @@ class ChallengesOnlyTests(WorldTestBase):
         self.assertEqual(w.mission_order, [MISSIONS[0].name])
         self.assertEqual(w.dlc_story, [])
         self.assertEqual(set(w.challenge_open_at), set(w.active_challenges))  # every challenge by the random order
-        self.assertEqual(w.options.goal_challenges.value, 50)
+        self.assertEqual(w.options.goal_challenges.value, 25)  # the default (0 would mean 50 here)
         self.assertFalse(w.options.final_mission_goal)
 
     def test_client_hides_story_and_quests(self) -> None:

@@ -40,7 +40,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.76"
+WORLD_VERSION = "0.9.77"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -235,8 +235,11 @@ class AgeOfCalamityWorld(World):
         pick = MISSIONS[1].name
         if options.first_mission != FirstMission.option_vanilla:
             any_mission = options.first_mission == FirstMission.option_random_any
+            # (never The Future of Hyrule: the final-mission rule moved it to the end and put the last slot's mission
+            # first - Calamity Strikes, which needs all four Champions: the fill failed, option fuzz 2026-11-02)
             pick = self.random.choice([m.name for m in MISSIONS[1:]
-                                       if (any_mission or m.chapter <= 2) and m.name not in CHAINED_MISSIONS])
+                                       if (any_mission or m.chapter <= 2) and m.name not in CHAINED_MISSIONS
+                                       and m.name != FINAL_MISSION])
             i = assigned.index(pick)
             assigned[1], assigned[i] = assigned[i], assigned[1]
         # (0.9.66-0.9.71 pinned Calamity Strikes and the rescues to their story slots. The user saw no Champion trap
@@ -382,6 +385,8 @@ class AgeOfCalamityWorld(World):
         # Camp and cooking unless an item holds them. Store rewards of those quests are given in full (pre_granted).
         o = self.options
         start_done = set(OPEN_SERVICE_QUESTS)
+        if dlc:  # the Ancient Tech Lab: open from the start (else only after Road to the Ancient Lab)
+            start_done.add("EX Ancient Tech Lab")
         self.pre_granted: dict[str, int] = {}
 
         def open_group(item: str, quests=None, grant: bool = False) -> None:

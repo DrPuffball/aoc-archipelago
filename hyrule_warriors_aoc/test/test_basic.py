@@ -7,6 +7,13 @@ from ..data_save import BASIC_WEAPONS
 from ..locations import KOROKS
 
 
+
+# The defaults before the 2026-11-02 default-run review (story order, no challenge goal, all 28 story missions, early
+# first mission, vanilla mission order, no free hints, Terrako Guardian locked): tests of that behaviour pin them.
+CLASSIC = {"mission_unlocks": "story_order", "goal_challenges": 0, "goal_story_missions": 28, "first_mission": "random_early",
+           "mission_order": "vanilla", "hint_mission_unlocks": False, "hint_heroes": False,
+           "locked_features": ["Terrako Guardian"]}
+
 class AoCTestBase(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
 
@@ -27,7 +34,7 @@ class AoCTestBase(WorldTestBase):
 
 
 class TestDefaults(AoCTestBase):
-    options = {"include_dlc": False}  # the base game's story (DLC defaults: TestDlcDefaults)
+    options = {**CLASSIC, "include_dlc": False}  # the base game's story (DLC defaults: TestDlcDefaults)
 
     def test_four_random_starters_precollected(self) -> None:
         names = {i.name for i in self.multiworld.precollected_items[self.player]}
@@ -120,7 +127,7 @@ class TestWeaponToggle(AoCTestBase):
 
 
 class TestShuffledOrder(AoCTestBase):
-    options = {"mission_order": "shuffle_all"}
+    options = {"mission_order": "shuffle_all", "first_mission": "random_early", "mission_unlocks": "story_order"}
 
     def test_slots_cover_all_missions(self) -> None:
         self.assertEqual(sorted(self.world.slot_to_mission.values()), sorted(m.name for m in MISSIONS))
@@ -138,7 +145,7 @@ class TestVanillaFirstMission(AoCTestBase):
 
 
 class TestSideGates(AoCTestBase):
-    options = {
+    options = {**CLASSIC,
         "include_dlc": False,
         "side_content": ["Challenges", "Quests"],
         "challenge_logic": "by_level",
@@ -158,7 +165,7 @@ class TestSideGates(AoCTestBase):
 
 
 class TestVanillaParty(AoCTestBase):
-    options = {"story_party": "vanilla", "starting_character_pool": ["Link"], "starting_character_count": 1,
+    options = {**CLASSIC, "story_party": "vanilla", "starting_character_pool": ["Link"], "starting_character_count": 1,
                "first_mission": "vanilla"}
 
     def test_champion_mission_needs_champion(self) -> None:
@@ -199,7 +206,7 @@ class TestChampionStartersFreeParty(AoCTestBase):
 
 
 class TestGoals(AoCTestBase):
-    options = {"goal": "story_and_side_missions", "goal_side_missions": 5, "side_content": ["Quests"], "include_dlc": False}
+    options = {**CLASSIC, "goal": "story_and_side_missions", "goal_side_missions": 5, "side_content": ["Quests"], "include_dlc": False}
 
     def test_goal_needs_side_missions(self) -> None:
         self.assertEqual(self.world.goal_side_required, 5)
@@ -269,7 +276,7 @@ class TestSteadyRewards(AoCTestBase):
 
 
 class TestPacing(AoCTestBase):
-    options = {"side_unlocks": "game_rules", "side_content": ["Weapons", "Challenges", "Quests"], "story_pacing": 100, "combo_upgrades": 1,
+    options = {**CLASSIC, "side_unlocks": "game_rules", "side_content": ["Weapons", "Challenges", "Quests"], "story_pacing": 100, "combo_upgrades": 1,
                "quest_reward_items": {}, "weapon_fusion": False, "seal_slot_upgrades": 0, "locked_features": []}
     # (fewer power items than early checks, so the spread is measurable)
 
@@ -352,7 +359,7 @@ class TestGoalExtrasExcludeNothing(AoCTestBase):
 
 
 class TestPostStoryWeaponsNoChecks(AoCTestBase):
-    options = {"side_content": ["Weapons"]}
+    options = {**CLASSIC, "side_content": ["Weapons"]}
 
     def test_no_check_behind_the_goal(self) -> None:
         from ..data import WEAPONS
@@ -371,7 +378,7 @@ class TestPostStoryWeaponsWithChallengeGoal(AoCTestBase):
 
 
 class TestBonusChecks(AoCTestBase):
-    options = {"side_content": []}
+    options = {**CLASSIC, "side_content": []}
 
     def test_items_get_bonus_checks_on_story_clears(self) -> None:
         import json
@@ -400,7 +407,7 @@ class TestNoBonusWhenChecksSuffice(AoCTestBase):
 
 
 class TestShortGoalExcludesLaterSlots(AoCTestBase):
-    options = {"side_content": ["Challenges"], "goal_story_missions": 10, "final_mission_goal": False}
+    options = {**CLASSIC, "side_content": ["Challenges"], "goal_story_missions": 10, "final_mission_goal": False}
 
     def test_slots_after_the_goal_hold_filler(self) -> None:
         from BaseClasses import LocationProgressType
@@ -469,7 +476,7 @@ class TestCalamityRescues(AoCTestBase):
 
 class TestVanillaPostStory(AoCTestBase):
     """post_story_unlock 20 (vanilla): post-story content opens after a story-only goal, so it holds no checks."""
-    options = {"post_story_unlock": 20, "side_content": ["Challenges", "Quests"]}
+    options = {**CLASSIC, "post_story_unlock": 20, "side_content": ["Challenges", "Quests"]}
 
     def test_no_checks_after_the_goal(self) -> None:
         from ..world import _post_story_challenge
@@ -538,8 +545,10 @@ class TestDlcDefaults(AoCTestBase):
         self.assertFalse(set(DLC_STORY_MISSIONS) & set(self.world.goal_challenge_pool))
         self.assertFalse(set(DLC_STORY_MISSIONS) & set(self.world.challenge_open_at))  # never by side counts
         self.assertTrue(set(DLC_STORY_MISSIONS) <= self.world.checked_challenges)
-        self.assertEqual(self.world.options.goal_story_missions.value, 28)
-        self.collect_by_name([f"Character: {c}" for c in self.world.characters if c not in self.world.starting_characters])
+        self.assertEqual(self.world.options.goal_story_missions.value, 20)  # any 20 of the 28 (default run review)
+        self.collect_by_name([f"Character: {c}" for c in self.world.characters if c not in self.world.starting_characters]
+                             + sorted({i.name for i in self.multiworld.get_items()
+                                       if i.player == self.player and i.name.startswith("Unlock: ")}))
         self.assertBeatable(True)
 
 
