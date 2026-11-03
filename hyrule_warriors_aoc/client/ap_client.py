@@ -49,6 +49,7 @@ STARTER_NOTE = ("This seed skips the forced first mission, but the starter save 
                 "is a New Game, close Age of Calamity in Ryujinx: the client installs the starter save (backup kept) "
                 "and you then pick Continue. Type /starter_save to force it.")
 
+REFRESH_HINT_SECONDS = 45  # how long the "pause and go back to the map" banner stays after a new seed's setup
 class AoCCommandProcessor(ClientCommandProcessor):
     ctx: AoCContext
 
@@ -231,6 +232,8 @@ class AoCContext(CommonContext):
         self._too_easy: set[str] | None = None  # clears below the difficulty lock (warned once each)
         self._below_goal: set[str] | None = None  # goal_difficulty: clears below it (announced once each)
         self._hero_waits_told: set[str] = set()  # open missions told to wait for their forced heroes (once each)
+        self._refresh_hint = False  # a starter save went in: ask for one map refresh once the game is on the map
+        self._refresh_until: float | None = None
         from .settings import load_settings
         self.banner_pref: bool | None = load_settings().get("goal_banner")  # /goal_banner; None = the seed's option
         self._shrink_seen: float | None = None  # when a possible New Game was first seen
@@ -369,11 +372,14 @@ class AoCContext(CommonContext):
 
         now = time.time()
         if self._several_emulators():
+            self.overlay.set_banner("Several emulators are open: close all but one")
             if self.live is not None:
                 self.live.close()
                 self.live = None
             return
         if (other := self.save_belongs_elsewhere()) and self._game_running():  # another seed's save: hands off
+            # (user, 2026-11-02: the note in the client window was easy to miss) stays up until the game is closed
+            self.overlay.set_banner("This save belongs to another seed: close the game, then start it again")
             if self._elsewhere_noted != other:
                 self._elsewhere_noted = other
                 logger.info("The save in use belongs to seed %s, so the client leaves the game alone. "
@@ -384,6 +390,8 @@ class AoCContext(CommonContext):
                 self.live.close()
                 self.live = None
             return
+        if self._elsewhere_noted is not None:
+            self.overlay.set_banner(None)
         self._elsewhere_noted = None
         if self.live is None:
             if now < self._live_retry:
@@ -1198,6 +1206,7 @@ class AoCContext(CommonContext):
             data = shelf.take(me)
             starter_save.install(path, save_copies(path), data, STATE_DIR / "backups")
             logger.info("Switched to this seed's own save (%s). Start Age of Calamity and pick Continue.", why)
+            self._refresh_hint = True
         else:
             data = starter_save.prepare(sorted(self.session.unlocked_characters), self.session.available_missions())
             starter_save.install(path, save_copies(path), data, STATE_DIR / "backups")
@@ -1205,6 +1214,7 @@ class AoCContext(CommonContext):
             from .savefile import owned_weapons
             self.delivery.set_baseline(owned_weapons(data))  # weapons it starts with are no finds; Hyrule Field counts
             self.delivery.state["primed"] = False  # heroes get weapons and stats on the first live tick
+            self._refresh_hint = True  # the map is drawn before the client sets it up: ask for one refresh
             logger.info("Starter save installed (%s). Start Age of Calamity and pick Continue: the forced first mission "
                         "is skipped; play %s with your starting heroes.", why,
                         " or ".join(m for m in self.session.available_missions() if m != FIRST_MISSION)
@@ -1222,7 +1232,17 @@ class AoCContext(CommonContext):
 
     def _show_goal_banner(self) -> None:
         """Goal progress at the top of the emulator window while on the world map (not during a mission)."""
-        on_map = self.banner_on() and not self.live._battle_character()
+        in_battle = self.live._battle_character()
+        if self._refresh_hint and not in_battle:  # a new seed's first visit: the map was drawn before the client's setup
+            if self._refresh_until is None:
+                self._refresh_until = time.monotonic() + REFRESH_HINT_SECONDS
+                logger.info("New seed set up: open the pause menu and go back to the map once, so the Smithy, the "
+                            "Training Camp and every opened icon show up.")
+            if time.monotonic() < self._refresh_until:
+                self.overlay.set_banner("New seed: pause and go back to the map once so everything appears")
+                return
+            self._refresh_hint = False
+        on_map = self.banner_on() and not in_battle
         self.overlay.set_banner(self.session.goal_banner_text() if on_map else None)
 
     def _show_selection(self) -> None:

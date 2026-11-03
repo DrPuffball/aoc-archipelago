@@ -21,7 +21,9 @@ cutscene, then close the game). Open only one emulator at a time.
 With the game **closed**, open **Age of Calamity Client** from the Archipelago Launcher and connect to your room
 with your slot name. The client sets up this seed's save by itself: a new seed gets a starter save (your previous save
 is kept and comes back when you connect to its seed again; switching between seeds works the same way). Then start
-Age of Calamity and pick **Continue**. Everything else is automatic:
+Age of Calamity and pick **Continue** (on a new seed, pause and go back to the map once so everything shows up).
+The game reads its save only when it boots, so connect the client before starting the game. Everything else is
+automatic:
 
 - The client finds the running game by itself and says `Connected to Age of Calamity in Ryujinx` (or `in Eden`).
 - Story missions, challenges, quests and weapons you complete or find are sent the moment the game registers them.

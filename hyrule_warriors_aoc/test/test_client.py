@@ -1391,3 +1391,18 @@ class SightingAlertClientTests(WorldTestBase):
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         unlocks = session.challenge_unlocks()
         self.assertFalse({MISSION_RECORD_IDS[n][0] for n in SIGHTING_ALERTS} & set(unlocks))
+
+
+class SideCountTests(WorldTestBase):
+    """Services open from the start never count as completed side missions (logic and client)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"goal": "story_and_side_missions", "goal_side_missions": 30}
+
+    def test_open_services_do_not_count(self) -> None:
+        from ..regions import quest_event
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        for q in session.open_quests:
+            session.on_quest_completed(q)
+        self.assertEqual(session.side_count, 0)
+        self.assertIn("Side 0/30", session.goal_banner_text())
+        self.assertFalse({quest_event(q) for q in self.world.open_quests} & set(self.world.side_counted))

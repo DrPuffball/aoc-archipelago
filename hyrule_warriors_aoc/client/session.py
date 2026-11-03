@@ -346,7 +346,7 @@ class Session:
             if slot != next(iter(self.mission_slots)) and mission not in self.mission_unlocks:
                 return False
             return all(c in self.unlocked_characters for c in self.party_required.get(mission, []))
-        if len(self.side_done) < self.side_required.get(slot, 0):
+        if self.side_count < self.side_required.get(slot, 0):
             return False
         if any(c not in self.unlocked_characters for c in self.party_required.get(mission, [])):
             return False
@@ -707,6 +707,12 @@ class Session:
         return frozenset(ids[0] for name, ids in MISSION_RECORD_IDS.items()
                          if name in CHALLENGE_BY_NAME and CHALLENGE_BY_NAME[name].is_ex)
 
+    @property
+    def side_count(self) -> int:
+        """Side missions completed, as the goal and the side gates count them: services open from the start are no
+        side mission you complete (a new seed showed "Side 23/30" before anything was played - user, 2026-11-02)."""
+        return sum(1 for n in self.side_done if not (n.startswith("quest:") and n[6:] in self.open_quests))
+
     def waiting_for_heroes(self) -> dict[str, list[str]]:
         """Missions and challenges that are otherwise open (unlock item in, or opened by the random order) but stay
         closed until the heroes the game forces into them are yours: name -> heroes still missing. User 2026-11-02:
@@ -756,7 +762,7 @@ class Session:
         needed = min(self.goal_story_missions - exclude_final, len(missions))
         if sum(m in self.cleared_missions or m in self.challenges_done for m in missions) < needed:
             return False
-        if len(self.side_done) < self.goal_side_missions:
+        if self.side_count < self.goal_side_missions:
             return False
         if self.goal_difficulty and sum(m in self.difficulty_cleared for m in missions) < needed:
             return False
@@ -798,7 +804,7 @@ class Session:
             done = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
             parts.append(f"Challenges {len(self.goal_challenge_pool & done)}/{self.goal_challenges}")
         if self.goal_side_missions:
-            parts.append(f"Side {len(self.side_done)}/{self.goal_side_missions}")
+            parts.append(f"Side {self.side_count}/{self.goal_side_missions}")
         if self.goal == 2:
             parts.append(f"Heroes {len(set(self.all_characters) & self.unlocked_characters)}/{len(self.all_characters)}")
         if self.goal == 3:
@@ -822,7 +828,7 @@ class Session:
             done = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
             lines.append(f"Goal: {len(self.goal_challenge_pool & done)}/{self.goal_challenges} challenges cleared{on}")
         if self.goal_side_missions:
-            lines.append(f"Goal: {len(self.side_done)}/{self.goal_side_missions} challenges or quests completed")
+            lines.append(f"Goal: {self.side_count}/{self.goal_side_missions} challenges or quests completed")
         if self.goal == 2:
             lines.append(f"Goal: {len(set(self.all_characters) & self.unlocked_characters)}/{len(self.all_characters)}"
                          " heroes received")
@@ -888,7 +894,7 @@ class Session:
             "<style>body{font:14px sans-serif;background:#111;color:#eee;margin:16px}"
             ".cleared{color:#6c6}.available{color:#fd6}.locked{color:#888}small{color:#999}"
             "div{display:flex;gap:32px;flex-wrap:wrap}</style>"
-            f"<h1>Age of Calamity</h1><p>Side missions done: {len(self.side_done)}"
+            f"<h1>Age of Calamity</h1><p>Side missions done: {self.side_count}"
             f" | Goal: {'COMPLETE' if self.goal_complete else 'in progress'}</p>"
             f"<div><section><h2>Story</h2><ol>{''.join(rows)}</ol></section>"
             f"<section><h2>Heroes</h2><ul>{li(sorted(self.unlocked_characters))}</ul></section>"
@@ -909,7 +915,7 @@ class Session:
             "available_missions": self.available_missions(),
             "mission_slots": self.mission_slots,
             "completed": {kind: sorted(names) for kind, names in self.done.items() if kind != "mission"},
-            "side_missions_completed": len(self.side_done),
+            "side_missions_completed": self.side_count,
             "side_missions_required": self.side_required,
             "settings": {
                 "minimum_character_level": self.min_level,

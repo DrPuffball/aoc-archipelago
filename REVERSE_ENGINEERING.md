@@ -192,6 +192,10 @@ folder and are not published yet (they expect local game dumps); they are listed
   of the Ancients missing. Battle-Tested Guardian = hero slot 18, weapon type `+0x12` = 221 (types step by 10 per slot),
   starter weapon kind 371 (Battle-Tested Screw); granted the same way, it shows and is playable. EX Alerts other
   than Forgotten Temple (the Guardian fight) need a sighting: forced open without one, the mission crashed loading.
+- Save loading [confirmed 2026-11-02, Eden]: the game reads the save file only when it boots. Back at the title screen
+  the save manager still holds the loaded save, and Continue does not re-read the file (a different save swapped in
+  at the title screen was ignored; the game would write its own copy back on the next save). So a save can only be
+  switched while the game is closed.
 - Service flags [confirmed 2026-11-02]: flags `0x318 + service id` (quest table type 16 row `+0x32`): shops 1-6,
   Smithy 8 (`0x320`), dye shop 9, Military Training Camp 10 (`0x322`), Relief for Soldier Stress 11. The facility only
   appears on the map with its flag set; marking the quest done alone left the Training Camp missing.

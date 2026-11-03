@@ -57,7 +57,8 @@ most people change:
 2. The client sets up this seed's save by itself and says so in its window ("Starter save installed").
    A new seed starts on the world map with your random starting heroes.
 3. Start Age of Calamity in your emulator and pick **Continue**. The client finds the game by itself
-   ("Connected to Age of Calamity in Ryujinx" or "... in Eden").
+   ("Connected to Age of Calamity in Ryujinx" or "... in Eden"). On a new seed, pause and go back to the map once
+   (a banner asks for it) so everything the client opened shows up.
 4. Play. Everything is automatic:
    - Clears, quests and challenges you complete are sent to the multiworld.
    - Heroes, upgrades, quest rewards, runes, weapons, rupees, materials and XP you receive appear in game.
@@ -101,6 +102,9 @@ the client doesn't recognise (it is kept, not deleted) · `/goal_banner on|off` 
 `/probe on|off` the research recorder for testers.
 
 ## Troubleshooting
+
+The full guide is `TROUBLESHOOTING.md`. The most common ones:
+
 
 - **"No Age of Calamity save found":** start the game once in your emulator. If your Ryujinx is portable or keeps
   its data elsewhere, open Ryujinx > File > Open Ryujinx Folder, copy that folder's path and type

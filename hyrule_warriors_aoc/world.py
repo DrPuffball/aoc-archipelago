@@ -40,7 +40,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.75"
+WORLD_VERSION = "0.9.76"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -595,8 +595,10 @@ class AgeOfCalamityWorld(World):
             return
         # Only side missions that need no particular character count in logic (always safe).
         free_challenges = [c for c in self.active_challenges if not CHALLENGE_BY_NAME[c].required_characters]
+        # (quests done from the start, the services the options open, are no side mission you complete: until 0.9.75
+        # they counted, and a new seed showed "Side 23/30" before anything was played - user, 2026-11-02)
         quests = {q: QUEST_BY_NAME[q] for q in self.active_quests
-                  if q not in self.item_quests and q not in self.unlock_quests}  # those need items
+                  if q not in self.item_quests and q not in self.unlock_quests and q not in self.open_quests}
 
         def counted_with(cleared: set[str]) -> set[str]:
             """Side events reachable once these missions are cleared (plain-Python mirror of rules.py)."""

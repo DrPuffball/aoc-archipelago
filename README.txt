@@ -136,6 +136,9 @@ KNOWN LIMITATIONS
 REPORTING PROBLEMS
 ------------------
 
+First see TROUBLESHOOTING.md (the usual fixes: close the game before switching seeds, pause and go back
+to the map once on a new seed, /todo for what the goal needs).
+
 Open an issue: https://github.com/DrPuffball/aoc-archipelago/issues with: what happened and what you expected, your YAML, the client log (Archipelago's
 logs folder, newest Launcher_*.txt).
 Testers can also type /probe on in the client: it then records which of its changes the game kept
