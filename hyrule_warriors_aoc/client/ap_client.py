@@ -448,7 +448,7 @@ class AoCContext(CommonContext):
                 self._prime_heroes()
             if self.session.story_party_free:
                 party = self.live.best_heroes(set(self.session.unlocked_characters))
-                if self.live.set_story_parties(party, challenges=True) and party != self._party_logged:
+                if self.live.set_story_parties(party, challenges=True, skip=self.session.vanilla_records())                         and party != self._party_logged:
                     self._party_logged = party
                     logger.info("Story missions and challenges now start with your heroes in place of forced heroes "
                                 "you don't have: %s", ", ".join(party))

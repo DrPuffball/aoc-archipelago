@@ -1378,3 +1378,16 @@ class FreePartyChallengeTests(WorldTestBase):
         session.apply_received_item_names([f"Unlock: {name}"])
         self.assertEqual(session.challenge_unlocks()[MISSION_RECORD_IDS[name][0]], ())
         self.assertEqual(session.waiting_for_heroes(), {})
+
+
+class SightingAlertClientTests(WorldTestBase):
+    """The client never opens an EX Alert itself (no monster: it crashed loading); Forgotten Temple is a normal one."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"include_dlc": True}
+
+    def test_alerts_left_to_the_game(self) -> None:
+        from ..data_save import MISSION_RECORD_IDS
+        from ..world import SIGHTING_ALERTS
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        unlocks = session.challenge_unlocks()
+        self.assertFalse({MISSION_RECORD_IDS[n][0] for n in SIGHTING_ALERTS} & set(unlocks))

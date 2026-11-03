@@ -929,7 +929,8 @@ class LiveGame:
                         self._write(addr + record, bytes([want]))
         return changed
 
-    def set_story_parties(self, heroes: list[str] | None, challenges: bool = False) -> list[str]:
+    def set_story_parties(self, heroes: list[str] | None, challenges: bool = False,
+                          skip: frozenset[int] = frozenset()) -> list[str]:
         """Give every story mission (with challenges=True every challenge too, the Expansion Pass story included) this
         party in place of its forced heroes (hero slots only; Divine Beast segments and empty slots stay; a mission's
         support heroes are skipped). heroes=None puts the vanilla parties back. Returns the records changed."""
@@ -937,6 +938,8 @@ class LiveGame:
         changed = []
         rows = {**S.VANILLA_STORY_PARTY, **(S.VANILLA_CHALLENGE_PARTY if challenges or heroes is None else {})}
         for record, vanilla_hex in rows.items():
+            if record in skip and heroes is not None:  # (records left vanilla, e.g. the DLC without include_dlc)
+                continue
             vanilla = bytes.fromhex(vanilla_hex)
             want = bytearray(vanilla)
             if heroes is not None:

@@ -62,7 +62,9 @@ class TestDefaults(AoCTestBase):
 
 class TestRestrictedChallenge(AoCTestBase):
     options = {"starting_character_pool": ["Link"], "starting_character_count": 1, "story_pacing": 0,
-               "story_party": "vanilla"}  # (free parties: the client puts your heroes in, no hero needed)
+               "story_party": "vanilla", "first_mission": "vanilla"}
+    # (free parties: the client puts your heroes in, no hero needed; vanilla first mission: a random first mission
+    # with a fixed party may hand you Daruk at the start, which made this test flaky)
 
     def test_restricted_challenge_needs_its_character(self) -> None:
         self.sweep()

@@ -655,6 +655,9 @@ class Session:
                 continue
             if CHALLENGE_BY_NAME[name].is_ex and not self.include_dlc:
                 continue  # the Expansion Pass plays vanilla
+            if name.startswith("EX Alert:") and name != "EX Alert: Forgotten Temple":
+                continue  # the game opens an Alert with its monster (sighting); opened by the client it has none and
+                          # crashes while loading (2026-11-02): never written, rows or map states
             if not self.story_party_free and any(c not in self.unlocked_characters
                                                  for c in CHALLENGE_BY_NAME[name].required_characters):
                 unlocks[ids[0]] = (ids[0],)  # its own clear: closed until its forced heroes are yours
@@ -694,6 +697,15 @@ class Session:
             for name in FEATURE_CHALLENGES["Fairy Fountains"]:  # closed until the item (opens after the final mission)
                 unlocks[MISSION_RECORD_IDS[name][0]] = (story[self.final_mission],)
         return unlocks
+
+    def vanilla_records(self) -> frozenset[int]:
+        """Challenge records the client leaves as the game has them: the Expansion Pass without include_dlc."""
+        from ..data_challenges import CHALLENGE_BY_NAME
+        from ..data_save import MISSION_RECORD_IDS
+        if self.include_dlc:
+            return frozenset()
+        return frozenset(ids[0] for name, ids in MISSION_RECORD_IDS.items()
+                         if name in CHALLENGE_BY_NAME and CHALLENGE_BY_NAME[name].is_ex)
 
     def waiting_for_heroes(self) -> dict[str, list[str]]:
         """Missions and challenges that are otherwise open (unlock item in, or opened by the random order) but stay
