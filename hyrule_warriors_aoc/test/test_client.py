@@ -461,12 +461,13 @@ class QuestRewardTests(WorldTestBase):
                                                "Progressive Seal Slot"))
         self.assertEqual(names.count(hot), 3)
         self.assertNotIn("Progressive Hot Springs", names)  # new seeds use the new names
-        self.assertEqual(names.count("Progressive Shop Unlock"), 4)
-        self.assertNotIn("Progressive Stable Unlock", names)
+        from ..data_rewards import SPLIT_INTO
+        shops = SPLIT_INTO["Progressive Shop Unlock"]  # 0.9.78: one item per shop
+        self.assertNotIn("Progressive Shop Unlock", names)
+        self.assertEqual([names.count(s) for s in shops], [1] * 8)
+        self.assertFalse([n for n in names if n.startswith("Stable (")])
         self.assertEqual(self.world.fill_slot_data()["quest_reward_items"],
-                         {hot: 3, "Progressive Shop Unlock": 4, detector: 2,
-                          seals: 2,
-                          "Feature: Terrako Guardian": 1})
+                         {hot: 3, **{s: 1 for s in shops}, detector: 2, seals: 2, "Feature: Terrako Guardian": 1})
 
     def test_shop_quests_are_checks_and_their_service_needs_the_item(self) -> None:
         from ..data_rewards import OPEN_SERVICE_QUESTS, REWARD_BY_ITEM
@@ -474,15 +475,15 @@ class QuestRewardTests(WorldTestBase):
         self.assertTrue(set(shops) <= self.world.checked_quests)  # buying a shop quest is its check
         self.assertFalse(set(OPEN_SERVICE_QUESTS) & self.world.checked_quests)
         self.assertNotIn("Brawny Blacksmiths", self.world.checked_quests)  # Smithy open from the start (default)
-        # Relief for Soldier Stress (8th shop quest) counts as done in game only with all 4 copies.
+        # Relief for Soldier Stress counts as done in game only with its own item.
         state = self.multiworld.get_all_state(False)
         rule = self.world.get_location("Event: Quest Relief for Soldier Stress").access_rule
         buy = self.world.get_location("Quest: Relief for Soldier Stress").access_rule
-        for k in range(4):
-            state.prog_items[self.player]["Progressive Shop Unlock"] = k
-            self.assertFalse(rule(state), k)
-            self.assertTrue(buy(state), k)  # buyable without the item
-        state.prog_items[self.player]["Progressive Shop Unlock"] = 4
+        item = "Shop (Relief for Soldier Stress)"
+        state.prog_items[self.player][item] = 0
+        self.assertFalse(rule(state))
+        self.assertTrue(buy(state))  # buyable without the item
+        state.prog_items[self.player][item] = 1
         self.assertTrue(rule(state))
 
     def test_shared_discount_counter_counts_free_quests(self) -> None:
@@ -517,12 +518,12 @@ class QuestRewardTests(WorldTestBase):
         session.on_quest_completed("Shop-Quick Store")
         self.assertEqual(session.quest_states()["Brilliance for the Boutique"], 1)  # bought, no item: closed again
         session.apply_received_item_names(["Progressive Hot Springs"] * 2
-                                          + ["Progressive Shop Unlock", "Progressive Treasure Detector"])
+                                          + ["Shop (Brilliance for the Boutique)", "Progressive Treasure Detector"])
         writes = session.reward_writes()
         self.assertEqual(writes[(PROFILE, 0x79E)], 2)
         self.assertEqual((writes[(PROFILE, 0xC7D)], writes[(PROFILE, 0xC7E)]), (1, 0))
         states = session.quest_states()
-        # 1 of 4 copies = 2 of 8 quests: the bought 1st opens; the 2nd isn't bought; the bought 3rd waits for its share
+        # the bought 1st opens with its item; the 2nd isn't bought; the bought 3rd waits for its own item
         self.assertEqual((states["Brilliance for the Boutique"], states.get("Gotta Have a Sign"), states["Shop-Quick Store"]),
                          (3, None, 1))
         self.assertIn("Brilliance for the Boutique", session.held_quests())
@@ -1072,9 +1073,10 @@ class CollectedRewardQuestTests(WorldTestBase):
     def test_known_reward_free_unknown_open(self) -> None:
         from ..data_rewards import ALL_GROUPS
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
-        session.apply_received_item_names(["Feature: Cooking"] + ["Progressive Research Quest"] * 14)
+        from ..data_rewards import SPLIT_INTO
+        session.apply_received_item_names(["Feature: Cooking"] + SPLIT_INTO["Progressive Research Quest"])
         known, unknown = "Hot Meals in a Pot", "Let's Dance"
-        self.assertIn(unknown, ALL_GROUPS["Progressive Research Quest"].known)
+        self.assertIn(unknown, ALL_GROUPS["Research Reward (Let's Dance)"].known)
         for q in (known, unknown):
             if q in session.ids["quest"]:
                 session.apply_checked_location_ids({session.ids["quest"][q]})
@@ -1093,7 +1095,7 @@ class RecipeStoreTests(WorldTestBase):
     def test_recipe_bytes_follow_items(self) -> None:
         from ..data_rewards import PROFILE
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
-        session.apply_received_item_names(["Progressive Recipe"] * 2)
+        session.apply_received_item_names(["Recipe (A Feast of Greens)", "Recipe (A Birthday Treat)"])
         writes = session.reward_writes()
         self.assertEqual(writes[(PROFILE, 0x2BC)], 1)  # A Feast of Greens
         self.assertEqual(writes[(PROFILE, 0x2CE)], 1)  # A Birthday Treat
@@ -1270,13 +1272,17 @@ class ProgressiveQuestNameTests(WorldTestBase):
     def test_copies_unlock_in_vanilla_order(self) -> None:
         from ..data_rewards import ALL_GROUPS
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
-        item = "Progressive Recipe"
+        item = "Progressive Hot Springs"
+        from ..data_rewards import canonical
+        item = canonical(item)
         self.assertEqual(session.unlocked_by(item), [])
         session.apply_received_item_names([item])
         first = session.unlocked_by(item)
         self.assertTrue(first)
         self.assertEqual(first[0], ALL_GROUPS[item].known[0])
-        self.assertEqual(ALL_GROUPS[item].known[0], "A Feast of Greens")  # opens right after Hyrule Field in vanilla
+        recipe = "Recipe (A Feast of Greens)"  # 0.9.78: an individual item names its own quest
+        session.apply_received_item_names([recipe])
+        self.assertEqual(session.unlocked_by(recipe), ["A Feast of Greens"])
 
 
 class MapSelectionTests(WorldTestBase):

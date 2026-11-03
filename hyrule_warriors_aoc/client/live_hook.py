@@ -724,10 +724,25 @@ class LiveGame:
             return None
         record = units + UNIT_RECORDS + unit * UNIT_SIZE
         raw = self.g.read(record, UNIT_HP + 12)
-        if not raw or struct.unpack_from("<II", raw) != (unit, kind):
+        if raw and struct.unpack_from("<II", raw) == (unit, kind):
+            hp, _, top = struct.unpack_from("<fff", raw, UNIT_HP)
+            return record + UNIT_HP if 400 <= top <= 60000 and -1 <= hp <= top + 1 else None
+        # char's first field isn't always its record (Eden 2026-11-02: it read 0 while the hero was record 50, same
+        # kind): find the record of that kind whose HP matches the display copy
+        shown = self.g.read(char + CHAR_HP, 8)
+        n = struct.unpack("<I", count)[0]
+        table_raw = self.g.read(units + UNIT_RECORDS, n * UNIT_SIZE)
+        if not shown or not table_raw:
             return None
-        hp, _, top = struct.unpack_from("<fff", raw, UNIT_HP)
-        return record + UNIT_HP if 400 <= top <= 60000 and -1 <= hp <= top + 1 else None
+        want = struct.unpack("<ff", shown)
+        for i in range(n):
+            base = i * UNIT_SIZE
+            if struct.unpack_from("<II", table_raw, base) != (i, kind):
+                continue
+            hp, _, top = struct.unpack_from("<fff", table_raw, base + UNIT_HP)
+            if (hp, top) == want and 400 <= top <= 60000:
+                return units + UNIT_RECORDS + base + UNIT_HP
+        return None
 
     def player_hp(self) -> float | None:
         """HP of the character you control (None outside missions): the real value, else the display copy."""

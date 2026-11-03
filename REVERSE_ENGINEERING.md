@@ -84,6 +84,10 @@ XP per level and hearts per level come from the game's own table (LinkData2 `007
   max `+0x2C` (400 per heart). Outside missions a stale object can remain, so a valid battle needs a sane max HP
   (400..60000). [confirmed]
 - Real HP: unit table `[[module + 0x2780A80] + 0x8] + 0x176E70 + unit*0x6C`, HP float at `+0x44`. [confirmed]
+  The record starts with (unit, kind) u32s. The character's first field is not always its unit index: on Eden
+  (2026-11-02) it read 0 while the controlled hero was record 50 (same kind 9, HP 5200/5200). The client falls back
+  to the record of that kind whose (HP, max HP) match the character's display copy. [confirmed layout; fallback
+  untested in a live DeathLink]
 - Mission flow: u32 at `[module + 0x2780A80] + 0xB0` (low byte 0 playing, 4 defeated, 12 retry). Writing a request
   at `+0xB8` (flag byte 2 at `+0xB3`) is taken next frame. 4 then 12 = defeat + retry; 4 alone soft-locks.
   [confirmed] Divine Beast battles have no defeat screen; the client restores HP if the defeat is never taken.

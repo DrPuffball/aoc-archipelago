@@ -21,7 +21,7 @@ from .data import (
     WEAPONS,
 )
 
-from .data_rewards import REWARD_BY_ITEM, REWARD_GROUPS
+from .data_rewards import INDIVIDUAL_GROUPS, REWARD_BY_ITEM, REWARD_GROUPS
 from .options import MissionUnlocks, SheikahRunes
 
 if TYPE_CHECKING:
@@ -84,6 +84,7 @@ _register([unlock_item(m.name) for m in MISSIONS[1:]], 850, 19)
 _register([unlock_item(MISSIONS[0].name)], 869, 1)  # 0.9.54-0.9.56 seeds only (Hyrule Field is first again since)
 _register([unlock_item(m) for m in DLC_STORY_MISSIONS], 870, 8)  # 0.9.74+: Guardian of Remembrance (include_dlc)
 _register([g.item for g in REWARD_GROUPS], 900, 50)
+_register([g.item for g in INDIVIDUAL_GROUPS], 1000, 200)  # 0.9.78: one item per individual reward
 
 UPGRADE_FAMILIES = set(CHARACTER_UPGRADES)
 

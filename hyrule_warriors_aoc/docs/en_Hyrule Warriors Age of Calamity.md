@@ -46,7 +46,10 @@ the DLC in your emulator the client takes it out of the goal and sends its check
   hints them all.
 - Upgrades: Heart Containers, Combo Upgrades, Special Gauge Upgrades and Enhanced Abilities per hero, plus
   Progressive Weapon Capacity, Progressive Seal Slot and Weapon Fusion.
-- Quest rewards (`quest_reward_items`, copies per item, 0 = vanilla). Most give their reward directly: recipes, the
+- Quest rewards (`quest_reward_items`, 0 = vanilla). Rewards that only raise a number (hearts, lessons, apple
+  capacity...) are progressive items; groups of different rewards (recipes, shops, stables, discounts, Smithy
+  upgrades, research quests, dyes, Divine Beast upgrades, EX reward quests) are one item per reward, named after
+  its quest, such as `Recipe (A Feast of Greens)`. Most give their reward directly: recipes, the
   Sheikah Sensor and its research, Divine Beast upgrades, rune cooldowns, heart recovery, damage taken, enemy XP, treasure detector,
   blacksmith and rust/seal upgrades, discounts, Smithy upgrades, Training Camp and cooking lessons, dyes, apple
   capacity. The client undoes a quest's own reward until its item arrives. A few (research quests, Maz Koshia's trials and the Expansion Pass reward quests)

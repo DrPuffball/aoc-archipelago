@@ -68,7 +68,7 @@ Hyrule Warriors Age of Calamity:
   weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
   locked_features: [Terrako Guardian, Fairy Fountains]  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian (cooking is open unless listed)
   sheikah_runes: shuffled              # vanilla | shuffled | start_with_all
-  # quest_reward_items: {...}          # copies of each quest reward item; default = every quest reward
+  # quest_reward_items: {...}          # which quest rewards are items (0 = vanilla); default = all but shops and stables
 
   # --- Filler ---
   filler_weights:

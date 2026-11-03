@@ -46,10 +46,14 @@ BEAST = {"Regulating the Reservoir": " (Vah Ruta)", "Surveying the Volcano": " (
          "Revitalize Those in the Skies": " (Vah Medoh)", "Patrolling the Desert": " (Vah Naboris)"}  # [guess by name]
 SELECTION_PAGE, SELECTION_SECONDS = 6, 4.0  # cursor panel: checks per page, seconds per page
 STARTER_NOTE = ("This seed skips the forced first mission, but the starter save isn't installed on this save. If this "
-                "is a New Game, close Age of Calamity in Ryujinx: the client installs the starter save (backup kept) "
+                "is a New Game, close Age of Calamity in the emulator: the client installs the starter save (backup kept) "
                 "and you then pick Continue. Type /starter_save to force it.")
 
 REFRESH_HINT_SECONDS = 45  # how long the "pause and go back to the map" banner stays after a new seed's setup
+TIP_SECONDS = 30  # how long a banner tip (what to do next) stays on the map
+TITLE_HINT_SECONDS = 120  # the game is up but unreadable this long: from "pick Continue" to "see the client window"
+
+
 class AoCCommandProcessor(ClientCommandProcessor):
     ctx: AoCContext
 
@@ -234,6 +238,9 @@ class AoCContext(CommonContext):
         self._hero_waits_told: set[str] = set()  # open missions told to wait for their forced heroes (once each)
         self._refresh_hint = False  # a starter save went in: ask for one map refresh once the game is on the map
         self._refresh_until: float | None = None
+        # A short instruction for the banner (user, 2026-11-02: "keep elaborating on it where it could apply"): shown on
+        # the map in place of the goal line until it expires, whatever /goal_banner says (it is what to do next).
+        self._banner_tip: tuple[str, float] | None = None
         from .settings import load_settings
         self.banner_pref: bool | None = load_settings().get("goal_banner")  # /goal_banner; None = the seed's option
         self._shrink_seen: float | None = None  # when a possible New Game was first seen
@@ -427,6 +434,7 @@ class AoCContext(CommonContext):
                 elif not (self.delivery and self.delivery.state.get("starter")):
                     logger.info(STARTER_NOTE)
                     self.overlay.show("Close the game: the client sets up your starter save")
+                    self._tip("New game? Close the game: the client then sets up your starter save", 600)
             # Weapons count as found once the player owns more copies than Archipelago handed out.
             given = self.delivery.state.get("weapons_given", {})
             cleared |= {n for n, c in self.live.weapon_counts().items() if c > given.get(n, 0)}
@@ -544,6 +552,7 @@ class AoCContext(CommonContext):
                 logger.info("%s is open for you, but the game forces %s into it: it appears once %s yours.", name,
                             " and ".join(waiting[name]), "they are" if len(waiting[name]) > 1 else "that hero is")
                 self.overlay.show(f"{name}: waits for {', '.join(waiting[name])}")
+                self._tip(f"{name} opens once you have {' and '.join(waiting[name])}")
             self._hero_waits_told |= set(waiting)
             if self.live.set_challenge_locks(self.session.challenge_unlocks()) and not self._challenges_logged:
                 self._challenges_logged = True
@@ -671,6 +680,7 @@ class AoCContext(CommonContext):
                        "sent so nothing is stuck behind them.", " / ".join(missing), self.session.goal_challenges,
                        len(left))
         self.overlay.show("DLC not installed: DLC checks sent, goal adjusted")
+        self._tip("Expansion Pass not found: it's out of your goal and its checks were sent", 90)
         if left:
             asyncio.create_task(self.check_locations(left), name="send DLC checks")
 
@@ -689,6 +699,7 @@ class AoCContext(CommonContext):
                 logger.info("%s was cleared below %s: its check is sent, but the goal only counts clears on %s or "
                             "harder.", name, level, level)
                 self.overlay.show(f"{name}: below {level} - doesn't count for the goal")
+                self._tip(f"{name}: replay it on {level} or harder for it to count for the goal")
         self._below_goal = below
 
     def _counted_clears(self) -> set[str]:
@@ -709,6 +720,7 @@ class AoCContext(CommonContext):
                     logger.info("%s was cleared below %s: it counts for nothing in this seed (difficulty lock). "
                                 "Replay it on %s or harder.", name, DIFFICULTIES[lock], DIFFICULTIES[lock])
                     self.overlay.show(f"{name}: too easy - replay on {DIFFICULTIES[lock]}+")
+                    self._tip(f"{name} didn't count: replay it on {DIFFICULTIES[lock]} or harder")
             self._too_easy = too_easy
         wanted = self.session.ids["difficulty"]
         for level in range(1, self.session.difficulty_levels + 1):
@@ -1230,6 +1242,10 @@ class AoCContext(CommonContext):
             return bool(self.banner_pref)
         return bool(self.session and self.session.goal_banner)
 
+    def _tip(self, text: str, seconds: float = TIP_SECONDS) -> None:
+        """Put what to do next in the banner for a while (the newest tip wins)."""
+        self._banner_tip = (text, time.monotonic() + seconds)
+
     def _show_goal_banner(self) -> None:
         """Goal progress at the top of the emulator window while on the world map (not during a mission)."""
         in_battle = self.live._battle_character()
@@ -1242,6 +1258,11 @@ class AoCContext(CommonContext):
                 self.overlay.set_banner("New seed: pause and go back to the map once so everything appears")
                 return
             self._refresh_hint = False
+        if getattr(self, "_banner_tip", None) and not in_battle:
+            if time.monotonic() < self._banner_tip[1]:
+                self.overlay.set_banner(self._banner_tip[0])
+                return
+            self._banner_tip = None
         on_map = self.banner_on() and not in_battle
         self.overlay.set_banner(self.session.goal_banner_text() if on_map else None)
 
@@ -1293,7 +1314,12 @@ class AoCContext(CommonContext):
             return
         if self._unreadable_since is None:
             self._unreadable_since = now
-        elif now - self._unreadable_since > 120 and not self._unreadable_warned:
+        # (the banner needs no readable game: it sits on the emulator window)
+        if now - self._unreadable_since <= TITLE_HINT_SECONDS:
+            self.overlay.set_banner("Archipelago connected: pick Continue to load your save")
+        else:
+            self.overlay.set_banner("The client can't read the game: see the client window")
+        if now - self._unreadable_since > 120 and not self._unreadable_warned:
             self._unreadable_warned = True
             logger.warning("An emulator is running Age of Calamity but the client can't read the game. Check: (1) "
                            "Ryujinx: Options > Settings > System > Memory Manager Mode = Software (then restart the "

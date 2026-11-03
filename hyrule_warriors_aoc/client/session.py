@@ -23,8 +23,8 @@ UPGRADE_NAMES = {
 
 
 def _reward_items() -> set[str]:
-    from ..data_rewards import REWARD_BY_ITEM
-    return set(REWARD_BY_ITEM)  # (Weapon Fusion and Progressive Seal Slot are in UPGRADE_NAMES)
+    from ..data_rewards import INDIVIDUAL_BY_ITEM, REWARD_BY_ITEM
+    return set(REWARD_BY_ITEM) | set(INDIVIDUAL_BY_ITEM)  # (Weapon Fusion and Progressive Seal Slot are in UPGRADE_NAMES)
 
 
 CHARACTER_PREFIX = "Character: "

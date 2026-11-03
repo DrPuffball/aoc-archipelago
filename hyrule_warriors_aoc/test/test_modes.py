@@ -83,7 +83,7 @@ class ModeServicesTests(WorldTestBase):
         w = self.world
         self.assertTrue(w.options.open_shops and w.options.open_dye_shop and w.options.start_with_sheikah_sensor)
         self.assertFalse(w.options.weapon_fusion)
-        self.assertTrue(w.group_copies.get("Progressive Recipe"))  # recipes are items on level clears
+        self.assertTrue([i for i, n in w.group_copies.items() if i.startswith("Recipe (") and n])  # recipe items
         counts = [n for n in w.challenge_bonus_checks.values()]
         if counts:
             self.assertLessEqual(max(counts) - min(counts + [0] * (len(w.checked_challenges) - len(counts))), 1)

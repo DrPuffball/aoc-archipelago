@@ -74,11 +74,14 @@ class TestRestrictedChallenge(AoCTestBase):
     # with a fixed party may hand you Daruk at the start, which made this test flaky)
 
     def test_restricted_challenge_needs_its_character(self) -> None:
-        self.sweep()
-        self.collect_by_name([f"Character: {c}" for c in ALL_CHARACTERS if c != "Daruk"])
-        self.assertFalse(self.can_reach_location("Challenge: Daruk's Training"))
-        self.collect_by_name(["Character: Daruk"])
-        self.assertTrue(self.can_reach_location("Challenge: Daruk's Training"))
+        # everything but Daruk (a sweep could pick Daruk up wherever the fill put him: flaky)
+        state = self.multiworld.get_all_state(False)
+        daruk = state.prog_items[self.player]["Character: Daruk"]
+        state.prog_items[self.player]["Character: Daruk"] = 0
+        rule = self.world.get_location("Challenge: Daruk's Training").access_rule
+        self.assertFalse(rule(state))
+        state.prog_items[self.player]["Character: Daruk"] = max(daruk, 1)
+        self.assertTrue(rule(state))
 
 
 class TestEverything(AoCTestBase):

@@ -265,7 +265,44 @@ FEATURE_GROUPS = {
 # Locked feature -> challenges kept closed on the map until its item arrives.
 FEATURE_CHALLENGES = {"Fairy Fountains": ("Fairy Fountain: Grassy Plains", "Fairy Fountain: Deep Snows",
                                           "Fairy Fountain: Desert Sands", "Fairy Fountain: Battlefield")}
-ALL_GROUPS = {**REWARD_BY_ITEM, **FEATURE_GROUPS}
+# 0.9.78: individual rewards are their own items (user rule, 2026-11-02: rewards with the exact same effect - a counter
+# like lessons or capacity - stay progressive; anything individual is its own unique item). Maz Koshia's trials stay
+# progressive: each opens the next fight (user's choice). New seeds replace each
+# group below by one item per quest (named "<effect> (<quest>)"); seeds generated before keep the progressive item.
+# Order = item ids (append only): items.py registers INDIVIDUAL_GROUPS in this order.
+_DIVINE_BEASTS = {"Regulating the Reservoir": "Vah Ruta", "Surveying the Volcano": "Vah Rudania",
+                  "Revitalize Those in the Skies": "Vah Medoh", "Patrolling the Desert": "Vah Naboris"}
+_SMITHY = {"Shiny New Tools": "Forging Discount", "Road to Rust Research": "Rust Removal Up",
+           "Tales of the Molten Forge": "Better Fusion Success", "The Legendary Blacksmith": "Max Weapon Level 30"}
+_SPLIT_NAMES = {
+    "Progressive Recipe": lambda q: f"Recipe ({q})",
+    "Progressive Regional Discount": lambda q: f"Regional Discount ({q})",
+    "Progressive Blacksmith Upgrade": lambda q: f"{_SMITHY[q]} ({q})",
+    "Progressive Research Quest": lambda q: f"Research Reward ({q})",
+    "Progressive Dye Colors": lambda q: f"Dye Colors ({q})",
+    "Progressive Divine Beast Upgrade": lambda q: f"Divine Beast {_DIVINE_BEASTS[q]} Upgrade ({q})",
+    "Progressive Shop Unlock": lambda q: f"Shop ({q})",
+    "Progressive Stable Unlock": lambda q: f"Stable ({q})",
+    "Progressive EX Reward Quest": lambda q: f"EX Reward ({q[3:]})",
+}
+COOKING_LESSONS = "Progressive Cooking Lessons (Snowbound Cook, Master Monster Roasts, Expert Cooking Lesson)"
+INDIVIDUAL_GROUPS: list[RewardGroup] = []
+SPLIT_INTO: dict[str, list[str]] = {}
+for _old, _name in _SPLIT_NAMES.items():
+    _g = REWARD_BY_ITEM[_old]
+    _quests = _g.known if _g.kind == "store" else _g.quests
+    SPLIT_INTO[_old] = []
+    for _i, _q in enumerate(_quests):
+        _new = RewardGroup(_name(_q), _g.kind, (_q,), (_g.writes[_i],) if _g.kind == "store" else (), _g.dlc)
+        INDIVIDUAL_GROUPS.append(_new)
+        SPLIT_INTO[_old].append(_new.item)
+# Cooking: the three lessons raise one counter (stay progressive); The Master Chef is its own reward.
+_cook = REWARD_BY_ITEM["Progressive Cooking Lesson"]
+INDIVIDUAL_GROUPS.append(RewardGroup(COOKING_LESSONS, "store", _cook.quests[:3], _cook.writes[:3]))
+INDIVIDUAL_GROUPS.append(RewardGroup("Master Chef (The Master Chef)", "store", _cook.quests[3:], _cook.writes[3:]))
+SPLIT_INTO["Progressive Cooking Lesson"] = [COOKING_LESSONS, "Master Chef (The Master Chef)"]
+INDIVIDUAL_BY_ITEM = {g.item: g for g in INDIVIDUAL_GROUPS}
+ALL_GROUPS = {**REWARD_BY_ITEM, **FEATURE_GROUPS, **INDIVIDUAL_BY_ITEM}
 # Open from the start (quest kept done, no check): Smithy, Training Camp, and cooking (user, 2026-11-02: cooking and the
 # pre-mission meal menu open by default; Feature: Cooking in locked_features still holds it back). [cooking: guess that
 # the quest-done state alone opens it, like the Smithy (confirmed for the Smithy)]

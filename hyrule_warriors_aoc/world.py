@@ -31,7 +31,7 @@ from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHALLENGE_QUEST_PRERE
                               DLC_STORY_MISSIONS)
 from .data_quests import QUEST_BY_NAME, QUESTS, UNUSED_QUESTS
 from .data_quest_unlocks import GAME_QUEST_PREREQS
-from .data_rewards import (ALL_GROUPS, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
+from .data_rewards import (ALL_GROUPS, SPLIT_INTO, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
                            reward_quest_count)
 from .data_save import BASIC_WEAPONS
 from .options import (
@@ -40,7 +40,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.77"
+WORLD_VERSION = "0.9.78"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -416,6 +416,13 @@ class AgeOfCalamityWorld(World):
         if self.game_mode and not self.reward_copies.get("Progressive Recipe"):
             open_group("Progressive Recipe", grant=True)  # both modes: recipe items, else every recipe from the start
                                                           # (no quests on the map to earn them)
+        # 0.9.78: groups of individual rewards become one item per quest (the counters stay progressive)
+        for old, parts in SPLIT_INTO.items():
+            if self.reward_copies.get(old):
+                self.reward_copies[old] = 0
+                for part in parts:  # (a quest open from the start, like the dye shop, needs no item)
+                    if not set(ALL_GROUPS[part].known) <= start_done:
+                        self.reward_copies[part] = reward_quest_count(ALL_GROUPS[part])
         self.group_copies = {**self.reward_copies, **extra}
         self.fairy_locked = "Fairy Fountains" in features
         # Quests whose service follows the quest state (shops, stables, the Smithy): buying is the check, the service
