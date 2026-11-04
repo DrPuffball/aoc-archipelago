@@ -9,8 +9,10 @@ each copy worth its share when the seed has fewer copies than quests, like Combo
   quest  the service follows the quest state (shops, stables; the Smithy was confirmed this way). Buying the quest is
          its check; the client keeps a bought quest done (service open) only once its item is in, and closes it again
          (not available) until then, so buying alone never opens the service.
-  unlock the reward's address is unknown: the quest itself is locked (kept not available) until its item arrives,
-         then opened, so its reward can only be earned after the item. These quests stay checks.
+  unlock the quest itself is locked (kept not available) until its item arrives, then opened, so its reward can only be
+         earned after the item. These quests stay checks. New seeds use it only where the quest IS the reward: Maz
+         Koshia's trials (each opens the next fight) and the locked features.
+  research  the quest table row is emptied, and the item gives the materials and outfit once (delivery ledger).
 A quest whose bytes are not known yet (writes None) is left vanilla and not counted; the group's item only covers
 the quests before it. Labels: [survey] = seen written by that quest's hand-in; [guess] = inferred (neighbouring bytes
 or a counter rising per quest of the type).
@@ -39,7 +41,7 @@ class RewardGroup(NamedTuple):
     @property
     def known(self) -> tuple[str, ...]:
         """Quests the client can enforce, in order (store kind stops at the first unknown one)."""
-        if self.kind in ("quest", "unlock", "hearts"):
+        if self.kind in ("quest", "unlock", "hearts", "research"):
             return self.quests
         out = []
         for quest, writes in zip(self.quests, self.writes):
@@ -302,7 +304,47 @@ INDIVIDUAL_GROUPS.append(RewardGroup(COOKING_LESSONS, "store", _cook.quests[:3],
 INDIVIDUAL_GROUPS.append(RewardGroup("Master Chef (The Master Chef)", "store", _cook.quests[3:], _cook.writes[3:]))
 SPLIT_INTO["Progressive Cooking Lesson"] = [COOKING_LESSONS, "Master Chef (The Master Chef)"]
 INDIVIDUAL_BY_ITEM = {g.item: g for g in INDIVIDUAL_GROUPS}
-ALL_GROUPS = {**REWARD_BY_ITEM, **FEATURE_GROUPS, **INDIVIDUAL_BY_ITEM}
+# 0.9.81: the last "item only opens the quest" rewards become direct (new seeds; older seeds keep the items above, which
+# still open their quests). The quest stays a check; its table row is emptied so buying it gives nothing, and the item
+# gives the reward.
+#   Expansion Pass abilities: a flag per quest, profile +0x185 + id - 463 (ids 463-465), + id - 461 (466+) [hand-ins; seen as
+#   [P+0x578]+0x2725.., the same place: [0x578] + 0x25A0 = [0x588], live 2026-11-04].
+#   Research: material (row +0x3A = index + 1; 3 of it [the hand-ins gave 2-3]) and maybe an outfit (row +0x3D).
+#   Royal gifts: the champion weapon in the row (+0x1C) is the existing "Weapon: <name>" item.
+EX_ABILITY_QUESTS = {
+    "EX The Text of Tomorrow": 463, "EX Hasty Recovery": 464, "EX Spear Master": 465, "EX A Giant Leap": 466,
+    "EX Awkward Allies": 467, "EX Analysis and Countermeasures": 468, "EX Keeping a Promise": 469,
+    "EX Survive the Training": 470, "EX The Art of Flight": 471, "EX Law of the Gerudo": 472, "EX Hard Defenses": 473,
+    "EX Unstoppable Sidon": 474, "EX Goron-Sized Appetites": 475, "EX Aim True at the Calamity": 476,
+    "EX Sand-Seal Bonding": 477, "EX Korok Curiosity": 478, "EX The Dazzling Crown": 479,
+    "EX Master Kohga's Lightning Training": 480, "EX Trial of Kema Kosassa": 481, "EX Relic Lessons": 482,
+    "EX Violent Obsessions": 483,
+}
+RESEARCH_REWARDS: dict[str, tuple[int, int | None]] = {  # quest -> (material index, outfit id)
+    "A Rumor about Skull Lake": (50, 19), "Cold Desert Nights": (50, 20), "Search Party for Parts": (149, None),
+    "Gathering the Facts": (149, None), "The Eye That Sees Far": (149, None), "Let's Dance": (149, None),
+    "A Secret in Song": (149, None), "Right under Our Noses": (149, None), "No Extreme Too Extreme": (149, None),
+    "Searching Eventide Island": (149, None), "Fang for Your Buck": (50, None), "Visiting a Special Shop": (50, 21),
+    "Research of a Lifetime": (145, None), "A Painter's Inspiration": (103, None),
+}
+RESEARCH_AMOUNT = 3
+ROYAL_GIFTS = {
+    "EX A Royal Gift for Mipha": "Serene Champion's Spear", "EX A Royal Gift for Sidon": "Gallant Hero's Spear",
+    "EX A Royal Gift for Daruk": "Steadfast Champion's Greatsword", "EX A Royal Gift for Yunobo": "Stalwart Hero's Feast",
+    "EX A Royal Gift for Revali": "Soaring Champion's Bow", "EX A Royal Gift for Teba": "Swift Hero's Bow",
+    "EX A Royal Gift for Urbosa": "Nimble Champion's Sword", "EX A Royal Gift for Riju": "Thunderous Hero's Bridle",
+}
+RESEARCH_ITEM = "Research Rewards ({})"
+DIRECT_GROUPS: list[RewardGroup] = [
+    RewardGroup(f"EX Ability ({q[3:]})", "store", (q,),
+                (((PROFILE, 0x185 + i - (463 if i < 466 else 461), 1),),), dlc=True)
+    for q, i in EX_ABILITY_QUESTS.items()
+] + [RewardGroup(RESEARCH_ITEM.format(q), "research", (q,)) for q in RESEARCH_REWARDS]
+DIRECT_BY_ITEM = {g.item: g for g in DIRECT_GROUPS}
+RESEARCH_BY_ITEM = {RESEARCH_ITEM.format(q): q for q in RESEARCH_REWARDS}
+SPLIT_INTO["Progressive Research Quest"] = [RESEARCH_ITEM.format(q) for q in REWARD_BY_ITEM["Progressive Research Quest"].quests]
+SPLIT_INTO["Progressive EX Reward Quest"] = [f"EX Ability ({q[3:]})" for q in EX_ABILITY_QUESTS]
+ALL_GROUPS = {**REWARD_BY_ITEM, **FEATURE_GROUPS, **INDIVIDUAL_BY_ITEM, **DIRECT_BY_ITEM}
 # Open from the start (quest kept done, no check): Smithy, Training Camp, and cooking (user, 2026-11-02: cooking and the
 # pre-mission meal menu open by default; Feature: Cooking in locked_features still holds it back). [cooking: guess that
 # the quest-done state alone opens it, like the Smithy (confirmed for the Smithy)]

@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..data import MATERIAL_BUNDLES, WEAPON_BUNDLES, WEAPON_BY_NAME, WEAPONS
+from ..data_rewards import RESEARCH_AMOUNT, RESEARCH_BY_ITEM, RESEARCH_REWARDS
 from ..data_save import WEAPON_KINDS
 from ..items import WEAPON_PREFIX
 from .savefile import SavePatch
@@ -141,7 +142,7 @@ class Delivery:
     # --- consumables ------------------------------------------------------------------------
 
     def pending(self, items: list[str]) -> list[str]:
-        return [n for n in items[self.state["applied"]:] if n in CONSUMABLES]
+        return [n for n in items[self.state["applied"]:] if n in CONSUMABLES or n in RESEARCH_BY_ITEM]
 
     def apply(self, items: list[str], heroes: set[str], target: Target) -> list[str]:
         """Apply every consumable received since last time. Returns what was done."""
@@ -149,10 +150,14 @@ class Delivery:
         done: list[str] = []
         end = len(items)
         for k, name in enumerate(new, start=self.state["applied"]):
-            if (name.startswith(WEAPON_PREFIX) or name in WEAPON_BUNDLES) and not hasattr(target, "give_weapon"):
+            if (name.startswith(WEAPON_PREFIX) or name in WEAPON_BUNDLES or name in RESEARCH_BY_ITEM) \
+                    and not hasattr(target, "give_weapon"):
                 end = k  # weapons go in only through the live hook: wait here until the game is running
                 break
-            if name == "Rupee Pouch":
+            if name in RESEARCH_BY_ITEM:
+                material, outfit = RESEARCH_REWARDS[RESEARCH_BY_ITEM[name]]
+                done.append(f"{name}: {target.give_research(material, RESEARCH_AMOUNT, outfit)}")
+            elif name == "Rupee Pouch":
                 done.append(f"Rupee Pouch: {target.add_rupees(RUPEE_POUCH)}")
             elif name in MATERIAL_BUNDLES:
                 kinds, amount = MATERIAL_BUNDLES[name]
@@ -169,9 +174,10 @@ class Delivery:
                 results = []
                 if self.skip_dlc:
                     from ..data import DLC_CHARACTERS
-                    if any(WEAPON_BY_NAME[w].character in DLC_CHARACTERS for w in weapons):
+                    if any(WEAPON_BY_NAME[w].character in DLC_CHARACTERS or WEAPON_BY_NAME[w].dlc for w in weapons):
                         done.append(f"{name}: skipped (no Expansion Pass in the game)")
-                        weapons = [w for w in weapons if WEAPON_BY_NAME[w].character not in DLC_CHARACTERS]
+                        weapons = [w for w in weapons
+                                   if WEAPON_BY_NAME[w].character not in DLC_CHARACTERS and not WEAPON_BY_NAME[w].dlc]
                 for weapon in weapons:
                     results.append(target.give_weapon(weapon, WEAPON_BY_NAME[weapon].character))
                     given = self.state.setdefault("weapons_given", {})

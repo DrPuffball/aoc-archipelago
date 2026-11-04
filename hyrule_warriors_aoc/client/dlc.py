@@ -43,6 +43,8 @@ def eden_enabled_dlc(root: str) -> set[int] | None:
     except OSError:
         return None
     line = next((ln for ln in text.splitlines() if ln.strip().startswith("DLC")), "")
+    if not line:  # (Discord report, Eden, both waves installed: a cache without the line says nothing about the DLC)
+        return None
     found = {DLC_BASE + int(n) for n in re.findall(r"\d+", line)}
     try:
         with open(os.path.join(root, "config", "qt-config.ini"), encoding="utf-8") as f:

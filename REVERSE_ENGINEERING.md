@@ -157,10 +157,34 @@ Unknown rewards, read from recorded hand-ins (materials were at max, so some rew
 - Terrako's Return: profile `+0xB37` 2 -> 3 (meaning unknown). Hot Meals in a Pot: FLAGS `0x1A07`, profile `+0x2C3`.
 - Never handed in yet: 29 EX reward quests, Ancient-Material Delivery, Seething Malice, Reigning Malice, Fiery Inspiration.
 
+### Royal Ancient Lab (Expansion Pass) [confirmed live on Eden, 2026-11-04]
+- 35 nodes: state list `[0x550]+0x4AE2 + node`, mirror `[0x5A0]+0x3AA5 + node` (1 locked, 2 open, 3 done). Writing 2 opens a node.
+- The lab shows on the map once `[0x5A0]+0x1A0F` is 1 (Road to the Ancient Lab's clear sets it).
+- Node table in memory, rows 0x40 apart (found by node 26's costs 2, 5, 10 at +0x23 and 0xA9 at +0; reloaded whenever the lab opens):
+  `+0x1B` u32 condition target, `+0x23` five u16 costs, `+0x2D` condition mission record, `+0x2F` reward weapon kind, `+0x31` attack
+  bonus, `+0x33` reward material count, `+0x35` five material index + 1, `+0x3A` condition type, `+0x3B` condition weapon type,
+  `+0x3C` ally given, `+0x3D` bonus weapon type, `+0x3E` weapon capacity bonus.
+- Condition types, in text order: 1 defeat with weapon type, 2 copy weapons, 3 perfect dodges, 4 Remote Bomb kills, 5 Magnesis throw-backs,
+  6 Stasis stops, 7 Cryonis freezes, 8 complete a mission, 9 fire rod kills.
+- The client keeps kill-count conditions in a normal game; it clears none. The two relic nodes ask for The Future of Hyrule, so they hold no checks when that mission is the goal.
+- Clearing target AND type (`+0x1B`, `+0x3A`, `+0x3B`) makes a conditioned node buy like a plain one, reward included. Clearing only
+  the target shows the reward screen, but the purchase changes nothing.
+- Zeroing `+0x2F`, `+0x31`, `+0x3E` or `+0x3C` removes that reward from a purchase; the node still costs materials and finishes.
+- Stored rewards are in tools/QUEST_MAP.md and `data_lab.py`. Profile `+0xC0F` rod duration, `+0xC10..0xC13` bomb [inferred from the
+  other three], Magnesis, Stasis, Cryonis damage, `+0xC2C/+0xC2D` attack research counters (+10 attack at weapon record `+0x76`), `+0xC88`
+  Seal Boost, `+0xC89` baked apples; flags `[0x5A0]+0x1A03, 0x1A08..0x1A0B, 0x1A0D, 0x1A0E, 0x640`; `[0x570]+0xF555` relic counter 0-2.
+  Weapon capacity is profile `+0x7A6`, the same byte the capacity quests use. `[0x578] + 0x25A0 = [0x588]`, so `[0x578]+0x31AF` is profile `+0xC0F`.
+- The Technology of Disassembly changes only its node state; Roll Out the Research and Sensor of the Heart showed no separate byte either [not seen].
+
+### Quest table in memory
+Rows of 80 bytes from `+0x10`, found 213168 bytes past the quest unlock table. Zeroing a row's reward fields (`+0x30..0x3F` research,
+`+0x1C` royal gift weapon) stops the vanilla reward: the panel shows the reward as x0 [panel seen; a full hand-in with an empty row not yet watched].
+
 How the client uses this (`data_rewards.py`):
 - **store** groups: the reward item sets the bytes; the client forces them to what the received items give.
 - **quest** groups: the service follows the quest state, opened once the item arrives.
-- **unlock** groups: stopgap while the reward is unknown; the quest is locked until its item arrives.
+- **unlock** groups: the quest is locked until its item arrives; new seeds use this only where the quest is the reward (Maz Koshia's trials, locked features).
+- **research** groups: the quest row is emptied and the item gives materials and outfit once.
 - When two groups touch one byte, the higher value wins. A vanilla-completed quest of an inactive group keeps its
   reward.
 - `data_save.QUEST_EFFECTS` holds bytes the client sets when it marks a quest done itself (open from the start, or

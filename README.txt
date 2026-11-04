@@ -1,5 +1,7 @@
-HYRULE WARRIORS: AGE OF CALAMITY - ARCHIPELAGO RANDOMIZER
+HYRULE WARRIORS: AGE OF CALAMITY - ARCHIPELAGO RANDOMIZER
 =========================================================
+
+Going forward, development focuses on the Eden emulator: new features are built and tested on Eden first. The new Royal Ancient Lab features in 0.9.81 have been tested on Eden only.
 
 An Archipelago (https://archipelago.gg) multiworld randomizer for Hyrule Warriors: Age of Calamity, played on
 the Ryujinx or Eden emulator on Windows. A live client runs beside the game and does everything automatically: it sends
@@ -47,17 +49,18 @@ Hyrule Warriors Age of Calamity.yaml (change name:). Give the YAML to whoever ge
 this apworld installed too. The defaults are the tested setup; the options most people change:
 
 - starting_character_count: random heroes you start with (default 4).
-- challenge_checks / quest_checks / weapon_checks: which side content holds checks (default: challenges and quests on, weapons off).
+- challenge_checks / quest_checks / lab_checks / weapon_checks: what holds checks (default: challenges, quests and the
+  Royal Ancient Lab on, weapons off).
 - challenge_unlock_order / quest_unlock_order: randomized (default) or vanilla.
 - mission_unlocks: items (default) = each story mission opens with its own item from the multiworld (you start
   with 2); story_order = in order.
 - first_mission: which missions you can start on (default any story mission; random_early = chapters 1-2).
-- goal_story_missions / goal_challenges: what the goal needs (default 20 of the 28 story missions and 25
-  challenges). With final_mission_goal (on), The Future of Hyrule opens once you have them and clearing it wins.
+- goal_story_missions / goal_challenges / goal_quests / goal_all_heroes: what the goal needs (default 20 of the 28
+  story missions and 25 challenges). With final_mission_goal (on), The Future of Hyrule opens once you have them and clearing it wins.
 - game_mode: standard, story_only (every check on story missions, each clear opens the next) or challenges_only
   (every check on challenges, no story or map quests).
 - difficulty_checks / difficulty_lock: extra checks for harder clears, or clears below a difficulty don't count.
-- Start Open: Sheikah Sensor, stables, shops and dye shop open from the start (on); trackers pre-done (off).
+- Open from the Start: Sheikah Sensor, stables, shops and dye shop open from the start (on); trackers pre-done (off).
 - hint_mission_unlocks / hint_heroes: free hints; hero_level_cap: heroes stay at 99 (level-ups still refill you).
 - filler_weights: filler mix (default about 40% material bundles in three sizes).
 - death_link: share deaths with the other players.
@@ -106,8 +109,11 @@ HOW THE RANDOMIZER WORKS
 - Items: heroes, per-hero upgrades (hearts, combo moves, special gauge, abilities), quest rewards, mission unlock
   items, the Cryonis / Magnesis / Stasis runes, and filler (hero XP gifts, weapon bundles, rupees, material bundles,
   meals). Most quest-reward items give their reward directly (recipes, Sheikah Sensor, rune and stat upgrades,
-  discounts, Smithy upgrades, lessons, dyes...). A few (research quests, Maz Koshia's trials and the Expansion Pass reward quests) still open their quest, and you
-  complete it for the reward (the client says which).
+  discounts, Smithy upgrades, lessons, dyes, research, Expansion Pass abilities and royal gifts). Buying the quest only
+  sends its check. Maz Koshia's trials are the exception: each trial is the next fight, so its item opens the quest.
+- Royal Ancient Lab (with lab_checks): the lab is on the map from the start and all 35 nodes are open. Each node you buy
+  sends a check. It still needs its materials and its own condition, such as 100 Remote Bomb kills. The two relic nodes
+  need The Future of Hyrule, so with final_mission_goal they hold no checks. Most rewards are items.
 - Side content opens at random by default: a few challenges and quests are open from the start and every completion
   opens 2-4 more (post-story ones included). Either kind can be set to the game's own order instead.
 - Story safety: Calamity Strikes needs Mipha, Daruk, Revali and Urbosa (the game traps any Champion you don't have
@@ -131,7 +137,7 @@ KNOWN LIMITATIONS
 - Post-story missions started before the story ends are untested: report any that won't load or behave oddly.
 - The world map has twice got stuck in its "new icons appear" sequence (under investigation): returning to the title
   screen usually helps; save often.
-- A few quest rewards (research quests, Maz Koshia's trials and the Expansion Pass reward quests) still open their quest, which you complete for the reward.
+- Three lab nodes keep the game's own reward (Roll Out the Research, The Technology of Disassembly, Sensor of the Heart).
 - Universal Tracker works without your YAML: connect it to your slot and it rebuilds the seed from the server.
 
 REPORTING PROBLEMS

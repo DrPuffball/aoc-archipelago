@@ -31,7 +31,8 @@ from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHALLENGE_QUEST_PRERE
                               DLC_STORY_MISSIONS)
 from .data_quests import QUEST_BY_NAME, QUESTS, UNUSED_QUESTS
 from .data_quest_unlocks import GAME_QUEST_PREREQS
-from .data_rewards import (ALL_GROUPS, SPLIT_INTO, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
+from .data_lab import FUTURE_OF_HYRULE, LAB_ITEM_COPIES, LAB_MISSION_CONDITION, LAB_NODES, LAB_WEAPON_ITEMS
+from .data_rewards import (ROYAL_GIFTS, RESEARCH_REWARDS, ALL_GROUPS, SPLIT_INTO, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
                            reward_quest_count)
 from .data_save import BASIC_WEAPONS
 from .options import (
@@ -40,7 +41,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.80"
+WORLD_VERSION = "0.9.81"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -197,6 +198,8 @@ class AgeOfCalamityWorld(World):
                                                           ("Quests", options.quest_checks)) if on}
         dlc = bool(options.include_dlc)
         self.characters = list(ALL_CHARACTERS if dlc else BASE_CHARACTERS)
+        if options.goal_all_heroes and options.goal == Goal.option_story:
+            options.goal.value = Goal.option_story_and_all_characters
         self.game_mode = options.game_mode.value
         self._apply_game_mode()
 
@@ -343,7 +346,7 @@ class AgeOfCalamityWorld(World):
         # means the game is won and everything released. post_story_unlock below the goal keeps it in.
         o = options
         self.post_goal_side = (o.goal == Goal.option_story and not o.goal_challenges.value
-                               and not o.goal_difficulty.value
+                               and not o.goal_quests.value and not o.goal_difficulty.value
                                and o.post_story_unlock.value >= min(o.goal_story_missions.value, len(MISSIONS)))
         self.checked_challenges = set(pick([c for c in self.active_challenges
                                             if not (self.post_goal_side and _post_story_challenge(c))]))             if "Challenges" in side else set()
@@ -416,6 +419,25 @@ class AgeOfCalamityWorld(World):
         if self.game_mode and not self.reward_copies.get("Progressive Recipe"):
             open_group("Progressive Recipe", grant=True)  # both modes: recipe items, else every recipe from the start
                                                           # (no quests on the map to earn them)
+        # 0.9.81: Royal Ancient Lab nodes hold checks (the client clears their kill-count conditions and opens them all)
+        self.checked_lab, self.lab_items, self.forced_items = [], {}, []
+        if dlc and o.lab_checks and not self.game_mode:
+            # (No checks behind The Future of Hyrule when clearing it wins: those nodes keep the game's reward.)
+            self.checked_lab = [n.name for n in LAB_NODES if n.name not in LAB_MISSION_CONDITION
+                                or LAB_MISSION_CONDITION[n.name] in self.active_challenges
+                                or (LAB_MISSION_CONDITION[n.name] == FUTURE_OF_HYRULE and not o.final_mission_goal)]
+            self.lab_items = {item: copies for item, copies in LAB_ITEM_COPIES.items()
+                              if any(n.item == item and n.name in self.checked_lab for n in LAB_NODES)}
+            self.forced_items += list(LAB_WEAPON_ITEMS)
+        if ut:
+            self.checked_lab = list(ut.get("lab_ids", ()))
+        # 0.9.81: royal gifts: the quest row is emptied and the champion weapon is an item of its own
+        self.emptied_quests = []
+        if self.reward_copies.get("Progressive EX Reward Quest"):
+            self.forced_items += [f"Weapon: {w}" for w in ROYAL_GIFTS.values()]
+            self.emptied_quests += list(ROYAL_GIFTS)
+        if self.reward_copies.get("Progressive Research Quest"):
+            self.emptied_quests += list(RESEARCH_REWARDS)
         # 0.9.78: groups of individual rewards become one item per quest (the counters stay progressive)
         for old, parts in SPLIT_INTO.items():
             if self.reward_copies.get(old):
@@ -470,7 +492,8 @@ class AgeOfCalamityWorld(World):
             self.checked_koroks = [v for n, v in names.items() if n in chosen]
         self.active_weapons = [w.name for w in WEAPONS if dlc or not w.dlc]
         # A hero's basic weapon is no check: a new game already hands several out, and the client gives the rest.
-        self.checked_weapons = [w for w in self.active_weapons if w not in BASIC_WEAPONS] if "Weapons" in side else []
+        self.checked_weapons = [w for w in self.active_weapons if w not in BASIC_WEAPONS
+                                and f"Weapon: {w}" not in self.forced_items] if "Weapons" in side else []
         shuffled = options.side_unlocks == SideUnlocks.option_shuffled  # (old option: game_rules = both vanilla)
         self.challenge_random = (shuffled and options.challenge_unlock_order == ChallengeUnlockOrder.option_randomized
                                  or self.game_mode == GameMode.option_challenges_only)
@@ -504,6 +527,7 @@ class AgeOfCalamityWorld(World):
             o.mission_unlocks.value = MissionUnlocks.option_story_order  # each clear opens the next (story_chain)
             o.goal.value = Goal.option_story
             o.goal_challenges.value = 0
+            o.goal_quests.value = 0
             o.goal_side_missions.value = 0
             o.side_missions_per_unlock.value = 0
         elif self.game_mode == GameMode.option_challenges_only:
@@ -511,6 +535,7 @@ class AgeOfCalamityWorld(World):
             o.mission_unlocks.value = MissionUnlocks.option_story_order
             o.final_mission_goal.value = 0
             o.goal.value = Goal.option_story
+            o.goal_quests.value = 0
             o.goal_side_missions.value = 0
             o.side_missions_per_unlock.value = 0
             if not o.goal_challenges.value:
@@ -551,7 +576,8 @@ class AgeOfCalamityWorld(World):
         o = self.options
         if o.weapon_check_logic == WeaponCheckLogic.option_after_character:
             return []
-        if o.goal != Goal.option_story or o.goal_challenges.value or self.goal_side_required or o.goal_difficulty.value:
+        if (o.goal != Goal.option_story or o.goal_challenges.value or o.goal_quests.value or self.goal_side_required
+                or o.goal_difficulty.value):
             return []  # the goal needs more than story clears, so the story (and these drops) can come first
         by_name = {w.name: w for w in WEAPONS}
         return [w for w in self.checked_weapons if not by_name[w].verified]
@@ -770,7 +796,7 @@ class AgeOfCalamityWorld(World):
         and their bonus / per-difficulty checks): the client sends them itself when the DLC isn't installed."""
         import re
         ex = {c.name for c in CHALLENGES if c.is_ex} | {q.name for q in QUESTS if q.is_ex}
-        ex |= {w.name for w in WEAPONS if w.dlc}
+        ex |= {w.name for w in WEAPONS if w.dlc} | {n.name for n in LAB_NODES}
         out = []
         for loc in self.multiworld.get_locations(self.player):
             if loc.address is None:
@@ -780,6 +806,17 @@ class AgeOfCalamityWorld(World):
             if name in ex:
                 out.append(loc.address)
         return sorted(out)
+
+    def goal_quest_pool(self) -> set[str]:
+        """Checked quests that count for goal_quests: those you can finish before the goal. A quest that waits for the
+        end of the story (at any depth) would lock the goal behind itself."""
+        def early(name: str, seen: set[str]) -> bool:
+            quest = QUEST_BY_NAME[name]
+            if quest.gate in ("HOPE", FINAL_MISSION) or quest.challenge_prereqs:
+                return False
+            seen.add(name)
+            return all(p in seen or early(p, seen) for p in set(quest.quest_prereqs) | set(GAME_QUEST_PREREQS.get(name, ())))
+        return {q for q in self.checked_quests if q in self.quest_open_at or early(q, set())}
 
     def _own_option_names(self) -> list[str]:
         from Options import PerGameCommonOptions
@@ -837,6 +874,8 @@ class AgeOfCalamityWorld(World):
             "goal_story_missions": self.options.goal_story_missions.value,
             "goal_challenges": min(self.options.goal_challenges.value, len(self.goal_challenge_pool)),
             "goal_challenge_pool": list(self.goal_challenge_pool),
+            "goal_quests": min(self.options.goal_quests.value, len(self.goal_quest_pool())),
+            "goal_quest_pool": sorted(self.goal_quest_pool()),
             "dlc_story_missions": list(self.dlc_story),
             "game_mode": self.game_mode,
             "story_chain": list(self.story_chain),
@@ -861,6 +900,9 @@ class AgeOfCalamityWorld(World):
             "weapon_ids": {n: ids[locations.weapon_location(n)] for n in self.checked_weapons},
             "challenge_ids": {n: ids[locations.challenge_location(n)] for n in sorted(self.checked_challenges)},
             "quest_ids": {n: ids[locations.quest_location(n)] for n in sorted(self.checked_quests)},
+            "lab_ids": {n: ids[locations.lab_location(n)] for n in self.checked_lab},
+            "lab_items": dict(self.lab_items),
+            "emptied_quests": list(self.emptied_quests),
             "korok_ids": {locations.korok_name(s, i): ids[locations.korok_name(s, i)] for s, _, i in self.checked_koroks},
             # "<mission or challenge> (<difficulty>)" -> id: sent when the game shows it cleared on that difficulty+
             "difficulty_ids": {loc.name.partition(": ")[2]: loc.address for loc in self.multiworld.get_locations(self.player)

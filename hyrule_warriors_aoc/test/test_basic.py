@@ -96,7 +96,9 @@ class TestEverything(AoCTestBase):
         # no check: quests open from the start (Training Camp; the Smithy only without Weapon Fusion); no Koroks
         no_check = len(set(OPEN_SERVICE_QUESTS) - set(self.world.item_quests))
         from ..data_quests import UNUSED_QUESTS
-        expected = (len(MISSIONS) + len([w for w in WEAPONS if w.name not in BASIC_WEAPONS]) - len(self.world.post_goal_weapons)
+        expected = (len(MISSIONS) + len(self.world.checked_lab)
+                    + len([w for w in WEAPONS if w.name not in BASIC_WEAPONS and f"Weapon: {w.name}" not in self.world.forced_items
+                           ]) - len(self.world.post_goal_weapons)
                     + len(self.world.checked_challenges)  # (post-story ones: after the goal, no checks)
                     + len(self.world.checked_quests))
         self.assertEqual(len(self.location_names()), expected)
@@ -108,14 +110,14 @@ class TestEverything(AoCTestBase):
 
 
 class TestStoryOnly(AoCTestBase):
-    options = {"side_content": []}
+    options = {"side_content": [], "lab_checks": False}
 
     def test_only_missions(self) -> None:
         self.assertEqual(len(self.location_names()), len(MISSIONS))
 
 
 class TestStoryOnlyToggles(AoCTestBase):
-    options = {"challenge_checks": False, "quest_checks": False}
+    options = {"challenge_checks": False, "quest_checks": False, "lab_checks": False}
 
     def test_only_missions(self) -> None:
         self.assertEqual(len(self.location_names()), len(MISSIONS))
@@ -358,7 +360,8 @@ class TestGoalExtrasExcludeNothing(AoCTestBase):
     def test_nothing_excluded(self) -> None:
         from worlds.AutoWorld import call_all
         call_all(self.multiworld, "pre_fill")
-        self.assertEqual(self.world.post_goal_excluded, [])
+        # (a lab node whose condition mission comes after the goal is left out of progression, correctly)
+        self.assertEqual([n for n in self.world.post_goal_excluded if not n.startswith("Lab: ")], [])
 
 
 class TestPostStoryWeaponsNoChecks(AoCTestBase):

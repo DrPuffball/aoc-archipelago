@@ -13,7 +13,9 @@ from .data_quest_unlocks import GAME_QUEST_PREREQS
 from .data_rewards import ALL_GROUPS, FEATURE_CHALLENGES
 from .data_quests import CHAPTER_TWO_MISSIONS, QUEST_BY_NAME
 from .items import character_item, rune_item, unlock_item
-from .locations import challenge_bonus_location, challenge_location, mission_location, quest_location, weapon_location
+from .data_lab import FUTURE_OF_HYRULE, LAB_BY_NAME, LAB_MISSION_CONDITION, LAB_RUNE_CONDITION, LAB_WEAPON_CONDITION
+from .locations import (challenge_bonus_location, challenge_location, lab_location, mission_location, quest_location,
+                        weapon_location)
 from .options import ChallengeLogic, GameMode, Goal, MissionUnlocks, SheikahRunes, StoryParty, WeaponCheckLogic
 from .regions import POST_STORY_EVENT, STORY_EVENT, VICTORY_EVENT, challenge_event, cleared_event, quest_event
 
@@ -65,6 +67,23 @@ def _gate_parts(gate: str):
     if gate == "HOPE":
         return [POST_STORY_EVENT], [], [], 0
     return [cleared_event(gate)], [], [], 0
+
+
+def lab_needs(world, name: str) -> tuple[list[str], list[str]]:
+    """(all of, any of): items and events a lab node's condition needs."""
+    from .items import character_item, rune_item, weapon_item
+    from .options import SheikahRunes
+    all_of, any_of = [], []
+    if name in LAB_MISSION_CONDITION:
+        mission = LAB_MISSION_CONDITION[name]
+        all_of.append(cleared_event(mission) if mission == FUTURE_OF_HYRULE else challenge_event(mission))
+    if name in LAB_RUNE_CONDITION and world.options.sheikah_runes == SheikahRunes.option_shuffled:
+        all_of.append(rune_item(LAB_RUNE_CONDITION[name]))
+    if name in LAB_WEAPON_CONDITION:
+        hero, weapons = LAB_WEAPON_CONDITION[name]
+        all_of.append(character_item(hero))
+        any_of += [weapon_item(w) for w in weapons]
+    return all_of, any_of
 
 
 def quest_gate_open(gate: str, events: set[str]) -> bool:
@@ -165,6 +184,8 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
     extras = _rule(player, goal_all, count_of=world.side_counted if goal_count else (), count=goal_count)
     challenge_events = [challenge_event(c) for c in world.goal_challenge_pool]
     challenges_needed = min(world.options.goal_challenges.value, len(challenge_events))
+    quest_events = [quest_event(q) for q in sorted(world.goal_quest_pool())]
+    quests_needed = min(world.options.goal_quests.value, len(quest_events))
     if final_goal:  # The Future of Hyrule opens after goal_story_missions - 1 other clears (+ challenges, extras)
         others = tuple(e for e in story_events if e != cleared_event(FINAL_MISSION))
         heroes = _rule(player, tuple(character_item(c) for c in world.mission_party.get(FINAL_MISSION, ())),
@@ -172,13 +193,15 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
         set_rule(world.get_entrance(f"Start {FINAL_MISSION}"),
                  lambda state: extras(state) and heroes(state)
                  and sum(state.has(e, player) for e in others) >= story_needed - 1
-                 and sum(state.has(e, player) for e in challenge_events) >= challenges_needed)
+                 and sum(state.has(e, player) for e in challenge_events) >= challenges_needed
+                 and sum(state.has(e, player) for e in quest_events) >= quests_needed)
         set_rule(world.get_entrance("Finish All Main Missions"),
                  lambda state: state.has(cleared_event(FINAL_MISSION), player))
     else:
         set_rule(world.get_entrance("Finish All Main Missions"),
                  lambda state: extras(state) and sum(state.has(e, player) for e in story_events) >= story_needed
-                 and sum(state.has(e, player) for e in challenge_events) >= challenges_needed)
+                 and sum(state.has(e, player) for e in challenge_events) >= challenges_needed
+                 and sum(state.has(e, player) for e in quest_events) >= quests_needed)
     world.multiworld.completion_condition[player] = lambda state: state.has(VICTORY_EVENT, player)
 
     for name in world.active_challenges:
@@ -189,6 +212,14 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
             set_rule(world.get_location(challenge_location(name)), rule)
             for k in range(1, world.challenge_bonus_checks.get(name, 0) + 1):  # sent with the challenge's clear
                 set_rule(world.get_location(challenge_bonus_location(name, k)), rule)
+
+    # Lab nodes are open from the start (client): the logic asks for some play first for the materials, deeper nodes more,
+    # and for what the node's own condition needs (lab_needs).
+    for name in world.checked_lab:
+        opens = LAB_BY_NAME[name].tier
+        all_of, any_of = lab_needs(world, name)
+        set_rule(world.get_location(lab_location(name)),
+                 _rule(player, all_of, any_of, count_of=(COMPLETIONS,) if opens else (), count=opens))
 
     for name in world.active_quests:
         quest = QUEST_BY_NAME[name]

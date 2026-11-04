@@ -29,6 +29,12 @@ UNLOCKS = (MODULE_BASE + 0x2780A38, 0x308, 0x60)  # mission unlock table (which 
 # Quest unlock table (LinkData2 0086e814) in the same param holder: 1000 rows of 36 bytes after a 16-byte header,
 # row = quest state id: +4 five u16 mission/challenge records, +14 five u16 quests it needs [read live 2026-10-28]
 QUEST_UNLOCKS = (MODULE_BASE + 0x2780A38, 0x300, 0x60)
+QUEST_ROW, QUEST_ROW_TYPE = 80, 0x1E  # quest table: rows of 80 bytes from +0x10, reward type at +0x1E
+QUEST_TABLE_DISTANCE = 213168  # quest table - unlock table, seen on Eden 2026-11-04 (searched for when it doesn't fit)
+LAB_STATES = (0x550, 0x4AE2)  # Royal Ancient Lab: node states
+LAB_VISIBLE_FLAG = 0x1A0F  # [0x5A0]: the lab is on the map
+WARDROBE_BLOCK, WARDROBE_COUNT, WARDROBE_LIST, WARDROBE_LIST_START = 0x570, 0x120, 0x1678, 5  # outfit list
+WARDROBE_OUTFIT_FLAGS, WARDROBE_FIRST_OUTFIT, WARDROBE_SAVED_COPY = 0x32BA, 19, 0xA890
 QUEST_UNLOCK_ROWS, QUEST_UNLOCK_SIZE = 1000, 36
 # In-battle player state (found by the client's research probe, 2026-10-27): battle object B = [[module + 0x2B63708]
 # + 0x30] (1.3.0 cheats used 0x2B5F708); [B + 0x8] = the character you control; its HP is a float at +0x28 and the
@@ -559,8 +565,8 @@ class LiveGame:
         prof = self._ptr(PROFILE)
         changed = []
         for offset, value in sorted(values.items()):
-            current = self.g.read(prof + offset, 1)
-            if current is None or current[0] > 10:
+            current = self.g.read(prof + offset, 1)  # (weapon capacity holds up to 4 + the lab's 30)
+            if current is None or current[0] > (40 if offset == S.WEAPON_CAPACITY_LEVEL else 10):
                 raise HookError("profile not recognised")
             if current[0] != value:
                 for copy in (0, PROFILE_SAVED_COPY):
@@ -596,6 +602,148 @@ class LiveGame:
                 for copy in (0, BLOCK_SAVED_COPY[block]):
                     self._write(base + copy + offset, bytes([value]))
                 changed.append((block, offset))
+        return changed
+
+    def give_research(self, material: int, amount: int, outfit: int | None) -> str:
+        """A research quest's reward: materials, and an outfit when it has one (hand-ins 2026-11-03: the wardrobe count
+        at +0x120 rises, the new list entry at +0x1678 holds the old count, the outfit's flag is +0x32BA + id - 19)."""
+        from ..data_materials import MATERIAL_NAMES
+        base = self._ptr(PROFILE) + MATERIALS + material * 2
+        raw = self.g.read(base, 2)
+        if raw is None:
+            raise HookError("materials unreadable")
+        old = struct.unpack("<H", raw)[0]
+        new = min(S.MATERIAL_MAX, old + amount)
+        self._write(base, struct.pack("<H", new))
+        self._expect_material("Research reward", base, old, new, material)
+        text = f"+{amount} {MATERIAL_NAMES.get(material, f'material {material}')}"
+        if outfit is None:
+            return text
+        wardrobe = self._ptr(WARDROBE_BLOCK)
+        flag = wardrobe + WARDROBE_OUTFIT_FLAGS + outfit - WARDROBE_FIRST_OUTFIT
+        if self.g.read(flag, 1) != b"\0":
+            return text + ", outfit already owned"
+        count = struct.unpack("<I", self.g.read(wardrobe + WARDROBE_COUNT, 4) or bytes(4))[0]
+        entry = WARDROBE_LIST + 8 * max(0, count - WARDROBE_LIST_START)
+        for copy in (0, WARDROBE_SAVED_COPY):
+            self._write(wardrobe + copy + WARDROBE_COUNT, struct.pack("<I", count + 1))
+            self._write(wardrobe + copy + entry, struct.pack("<Q", count))
+            self._write(flag + copy, b"\1")
+        return text + f", outfit {outfit}"
+
+    # --- Royal Ancient Lab (data_lab) -------------------------------------------------------------------------------
+
+    def _lab_row0(self) -> int | None:
+        """Address of the lab's anchor row (found by its costs; the scan's distance from the unlock table is kept)."""
+        holder = self.g.u64(QUEST_UNLOCKS[0])
+        table = self.g.u64(holder + QUEST_UNLOCKS[1]) if holder else None
+        if not table:
+            return None
+        marker = struct.pack("<HHH", 2, 5, 10)
+        known = getattr(self, "_lab_distance", None)
+        if known is not None and self.g.read(table + known + 0x23, 6) == marker:
+            return table + known
+        for off in range(-(16 << 20), 16 << 20, 1 << 20):
+            data = self.g.read(table + off, (1 << 20) + 32) or b""
+            at = data.find(marker)
+            while at >= 0:
+                if at >= 0x23 and data[at - 0x23] == 0xA9:
+                    self._lab_distance = off + at - 0x23
+                    return table + self._lab_distance
+                at = data.find(marker, at + 1)
+        return None
+
+    def sync_lab(self, values: dict[tuple[int, int], int], check_nodes: set[str]) -> list[str]:
+        """Keep the lab as the seed wants it: every node open, table rewards the items give removed,
+        stored rewards following the items. Returns the check nodes the game shows done."""
+        from ..data_lab import (ATTACK_PER_NODE, LAB_ATTACK, LAB_ATTACK_FIELD, WEAPON_LAB_ATTACK, LAB_CAPACITY_FIELD, LAB_MIRROR, LAB_NODE_COUNT, LAB_NODES, LAB_ROW_ANCHOR,
+                                LAB_ROW_SIZE, LAB_WEAPON_FIELD)
+        from ..data_rewards import BLOCK_SAVED_COPY, FLAGS, PROFILE
+        # The lab shows on the map only with this flag, set by Road to the Ancient Lab's clear [confirmed live 2026-11-04].
+        flags = self._ptr(FLAGS)
+        if self.g.read(flags + LAB_VISIBLE_FLAG, 1) != b"":
+            for copy in (0, BLOCK_SAVED_COPY[FLAGS]):
+                self._write(flags + copy + LAB_VISIBLE_FLAG, b"")
+        states_at = self._ptr(LAB_STATES[0]) + LAB_STATES[1]
+        mirror_at = self._ptr(LAB_MIRROR[0]) + LAB_MIRROR[1]
+        states = self.g.read(states_at, LAB_NODE_COUNT)
+        if states is None or not all(1 <= s <= 3 for s in states):
+            raise HookError("lab states not recognised")
+        for i, state in enumerate(states):
+            if state == 1:
+                self._write(states_at + i, b"\2")
+                self._write(mirror_at + i, b"\2")
+        row0 = self._lab_row0()
+        if row0 is None:
+            raise HookError("lab table not found")
+        for node in LAB_NODES:
+            row = row0 + (node.index - LAB_ROW_ANCHOR) * LAB_ROW_SIZE
+            fields = []
+            if node.kind == "weapon":
+                fields += [(LAB_WEAPON_FIELD, 2), (LAB_ATTACK_FIELD, 2)]
+            if node.kind == "attack":
+                fields += [(LAB_ATTACK_FIELD, 2), (0x3D, 2)]
+            if node.kind == "hero":
+                fields.append((0x3C, 1))
+            if node.kind == "count" and node.index in (13, 14):
+                fields.append((LAB_CAPACITY_FIELD, 2))
+            for field, size in fields:
+                if self.g.read(row + field, size) != bytes(size):
+                    self._write(row + field, bytes(size))
+        for (block, offset), value in values.items():
+            base = self._ptr(block)
+            if self.g.read(base + offset, 1) != bytes([value]):
+                self._write(base + offset, bytes([value]))
+                if block in (FLAGS, PROFILE):
+                    self._write(base + BLOCK_SAVED_COPY[block] + offset, bytes([value]))
+        for item, (byte, hero, weapons) in LAB_ATTACK.items():
+            kinds = {S.WEAPON_KINDS[w][0] for w in weapons}
+            bonus = values.get(byte, 0) * ATTACK_PER_NODE
+            for slot, kind in enumerate(self.hero_weapons(hero)):
+                if kind in kinds:
+                    offset = (S.HERO_SLOTS[hero] * WEAPONS_PER_HERO + slot) * WEAPON_RECORD + WEAPON_LAB_ATTACK
+                    for base in self._weapon_pools():
+                        if self.g.read(base + offset, 2) != struct.pack("<H", bonus):
+                            self._write(base + offset, struct.pack("<H", bonus))
+        return [n.name for n in LAB_NODES if states[n.index] == 3 and n.name in check_nodes]
+
+    def _quest_table(self) -> int | None:
+        """The quest table in memory, recognised by the type bytes of known quests (research 36, royal gift 51)."""
+        holder = self.g.u64(QUEST_UNLOCKS[0])
+        table = self.g.u64(holder + QUEST_UNLOCKS[1]) if holder else None
+        if not table:
+            return None
+
+        def good(base: int) -> bool:
+            return (self.g.read(base + 0x10 + 362 * QUEST_ROW + QUEST_ROW_TYPE, 1) == b"\x24"
+                    and self.g.read(base + 0x10 + 455 * QUEST_ROW + QUEST_ROW_TYPE, 1) == b"\x33")
+        known = getattr(self, "_quest_table_distance", QUEST_TABLE_DISTANCE)
+        if good(table + known):
+            return table + known
+        for off in range(-(64 << 20), 64 << 20, 1 << 20):
+            data = self.g.read(table + off, 1 << 20)
+            if not data:
+                continue
+            for at in range(0, len(data), 16):  # (allocations are 16-aligned)
+                if data[at:at + 4] == b"\0\0\0\0" and good(table + off + at):
+                    self._quest_table_distance = off + at
+                    return table + off + at
+        return None
+
+    def empty_quest_rows(self, quests: list[str]) -> list[str]:
+        """Take the rewards out of these quests' table rows, so buying one only sends its check: the weapon (+0x1C, type
+        51) or the material and outfit (+0x30..+0x3F, type 36). Rows the game put back are emptied again."""
+        table = self._quest_table()
+        if table is None:
+            raise HookError("quest table not found")
+        changed = []
+        for name in quests:
+            row = table + 0x10 + S.QUEST_STATE_IDS[name] * QUEST_ROW
+            for field, size in ((0x1C, 2), (0x30, 0x10)) if self.g.read(row + QUEST_ROW_TYPE, 1) == b"\x33" else ((0x30, 0x10),):
+                if self.g.read(row + field, size) != bytes(size):
+                    self._write(row + field, bytes(size))
+                    if name not in changed:
+                        changed.append(name)
         return changed
 
     def set_quest_states(self, states: dict[str, int]) -> list[str]:

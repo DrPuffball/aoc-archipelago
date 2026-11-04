@@ -34,7 +34,7 @@ checks that send items to other players.
 `difficulty_checks` adds one check per mission (and challenge) for each harder difficulty you clear it on. When
 there are more items than checks, story and challenge clears get bonus checks (sent with the clear).
 `side_check_density` thins the quest, challenge and Korok checks for shorter games. Quests for services open from
-the start (stables, shops, dye shop, Sheikah Sensor, the Expansion Pass's Ancient Tech Lab; options in the "Start Open" group) hold no check. Expansion Pass
+the start (stables, shops, dye shop, Sheikah Sensor, the Expansion Pass's Royal Ancient Lab; options in the "Open from the Start" group) hold no check. Expansion Pass
 content (on by default with `include_dlc`) is treated like the base game's: the 8 Guardian of Remembrance missions
 are story missions (goal, unlock items), EX challenges and quests are checks, and the DLC heroes are items. Without
 the DLC in your emulator the client warns you, and `/no_dlc` takes it out of the goal and sends its checks.
@@ -52,8 +52,8 @@ the DLC in your emulator the client warns you, and `/no_dlc` takes it out of the
   its quest, such as `Recipe (A Feast of Greens)`. Most give their reward directly: recipes, the
   Sheikah Sensor and its research, Divine Beast upgrades, rune cooldowns, heart recovery, damage taken, enemy XP, treasure detector,
   blacksmith and rust/seal upgrades, discounts, Smithy upgrades, Training Camp and cooking lessons, dyes, apple
-  capacity. The client undoes a quest's own reward until its item arrives. A few (research quests, Maz Koshia's trials and the Expansion Pass reward quests)
-  still open their quest, and you complete it for its reward.
+  capacity, research rewards, Expansion Pass abilities and royal gift weapons. The client undoes a quest's own reward until its item arrives. Maz Koshia's trials are the exception: each trial is the next fight, so its item opens the quest.
+- Royal Ancient Lab rewards (with `lab_checks`): each node you buy sends a check; its reward is an item, such as `Buy Apples (An Abundance of Apples)` or a lab weapon. All 35 nodes are open from the start; each still needs its materials and its own condition, such as defeating 100 enemies with Remote Bombs.
 - Weapons.
 - Filler (weights set by `filler_weights`): character XP gifts, free weapons (Extra Weapon 1, Weapon Bundle 3, Large
   Weapon Bundle 5, for different heroes), Rupee Pouches, Small / regular / Large Material Bundles, Hearty Meals.

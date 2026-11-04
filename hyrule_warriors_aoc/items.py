@@ -21,7 +21,8 @@ from .data import (
     WEAPONS,
 )
 
-from .data_rewards import INDIVIDUAL_GROUPS, REWARD_BY_ITEM, REWARD_GROUPS
+from .data_lab import LAB_ITEMS
+from .data_rewards import DIRECT_GROUPS, INDIVIDUAL_GROUPS, REWARD_BY_ITEM, REWARD_GROUPS
 from .options import MissionUnlocks, SheikahRunes
 
 if TYPE_CHECKING:
@@ -85,13 +86,24 @@ _register([unlock_item(MISSIONS[0].name)], 869, 1)  # 0.9.54-0.9.56 seeds only (
 _register([unlock_item(m) for m in DLC_STORY_MISSIONS], 870, 8)  # 0.9.74+: Guardian of Remembrance (include_dlc)
 _register([g.item for g in REWARD_GROUPS], 900, 50)
 _register([g.item for g in INDIVIDUAL_GROUPS], 1000, 200)  # 0.9.78: one item per individual reward
+_register([g.item for g in DIRECT_GROUPS], 1200, 100)  # 0.9.81: rewards given directly (EX abilities, research)
+_register(LAB_ITEMS, 1300, 50)  # 0.9.81: Royal Ancient Lab rewards
 
 UPGRADE_FAMILIES = set(CHARACTER_UPGRADES)
+
+
+def _lab_progression(world: AgeOfCalamityWorld) -> set[str]:
+    """Items a checked lab node's condition waits on."""
+    from .rules import lab_needs
+    return {item for node in world.checked_lab for part in lab_needs(world, node) for item in part
+            if item in ITEM_NAME_TO_ID}
 
 
 def classify(world: AgeOfCalamityWorld, name: str) -> ItemClassification:
     if name in FILLER_ITEMS:
         return ItemClassification.filler
+    if getattr(world, "checked_lab", None) and name in _lab_progression(world):
+        return ItemClassification.progression
     if name.startswith(CHARACTER_PREFIX):
         # Characters only matter to logic through restricted challenges, quests and weapon checks.
         return ItemClassification.progression if world.characters_matter else ItemClassification.useful
@@ -191,6 +203,7 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
                    and not (m == FINAL_MISSION and options.final_mission_goal)]  # opens by the goal's counts
         wanted += [unlock_item(m) for m in world.dlc_story]  # DLC story missions open by their own items too
     wanted += [character_item(c) for c in world.characters if c not in world.starting_characters]
+    wanted += list(world.forced_items)  # weapons a lab node or royal gift stands for: their only source
     wanted += [f"Feature: {f}" for f in sorted(f for f in FEATURES if f in options.locked_features.value)
                if not (f == "Shops" and options.open_shops)]  # open_shops wins over a locked Shops feature
     if options.sheikah_runes == SheikahRunes.option_shuffled:
@@ -208,8 +221,10 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
     upgrades = [upgrade_item(f, c) for f, n in copies.items() for c in world.characters for _ in range(n)]
     upgrades += [name for name, n in global_copies.items() for _ in range(n)]
     upgrades += [name for name, n in world.reward_copies.items() for _ in range(n)]
+    upgrades += [name for name, n in world.lab_items.items() for _ in range(n)]
 
-    weapon_names = [w for w in world.active_weapons if w not in world.post_goal_weapons]  # those drop as vanilla
+    weapon_names = [w for w in world.active_weapons if w not in world.post_goal_weapons  # those drop as vanilla
+                    and weapon_item(w) not in world.forced_items]
     world.random.shuffle(weapon_names)
     weapons = [weapon_item(n) for n in weapon_names[: options.weapon_items.value]]
     # More items than checks: story clears hold extra checks (sent with the clear) instead of handing items out

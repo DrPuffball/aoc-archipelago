@@ -23,8 +23,9 @@ UPGRADE_NAMES = {
 
 
 def _reward_items() -> set[str]:
-    from ..data_rewards import INDIVIDUAL_BY_ITEM, REWARD_BY_ITEM
-    return set(REWARD_BY_ITEM) | set(INDIVIDUAL_BY_ITEM)  # (Weapon Fusion and Progressive Seal Slot are in UPGRADE_NAMES)
+    from ..data_lab import LAB_ITEMS
+    from ..data_rewards import DIRECT_BY_ITEM, INDIVIDUAL_BY_ITEM, REWARD_BY_ITEM
+    return set(REWARD_BY_ITEM) | set(INDIVIDUAL_BY_ITEM) | set(DIRECT_BY_ITEM) | set(LAB_ITEMS)  # (Weapon Fusion and Progressive Seal Slot are in UPGRADE_NAMES)
 
 
 CHARACTER_PREFIX = "Character: "
@@ -40,6 +41,7 @@ LOCATION_KINDS = {
     "quest": "quest_ids",
     "korok": "korok_ids",
     "difficulty": "difficulty_ids",  # "<mission or challenge> (<difficulty>)"
+    "lab": "lab_ids",  # 0.9.81: Royal Ancient Lab nodes
 }
 
 
@@ -158,6 +160,8 @@ class Session:
         self.post_story_unlock = int(slot_data.get("post_story_unlock", 20))
         self.post_story_quests: list[str] = list(slot_data.get("post_story_quests", []))
         self.goal_challenge_pool: set[str] = set(slot_data.get("goal_challenge_pool", []))
+        self.goal_quests = int(slot_data.get("goal_quests", 0))
+        self.goal_quest_pool: set[str] = set(slot_data.get("goal_quest_pool", []))
         self.dlc_location_ids: list[int] = list(slot_data.get("dlc_location_ids", []))
         # side_unlocks random (0.9.53+): challenge/quest -> completions (story clears, challenges, quests) it opens after
         self.challenge_open_at: dict[str, int] = dict(slot_data.get("challenge_open_at", {}))
@@ -216,6 +220,8 @@ class Session:
         self.upgrades: dict[str, int] = {}
         self.features: set[str] = set()
         self.cleared_missions: set[str] = set()
+        self.lab_items: dict[str, int] = dict(slot_data.get("lab_items", {}))
+        self.emptied_quests: list[str] = list(slot_data.get("emptied_quests", ()))  # 0.9.81: quest rows with no reward
         self.done: dict[str, set[str]] = {kind: set() for kind in LOCATION_KINDS}
         self.done["mission"] = self.cleared_missions
         self.obtained_weapons = self.done["weapon"]
@@ -269,6 +275,8 @@ class Session:
         self.goal_challenge_pool = {c for c in self.goal_challenge_pool
                                     if c not in CHALLENGE_BY_NAME or not CHALLENGE_BY_NAME[c].is_ex}
         self.goal_challenges = min(self.goal_challenges, len(self.goal_challenge_pool))
+        self.goal_quest_pool = {q for q in self.goal_quest_pool if not q.startswith("EX ")}
+        self.goal_quests = min(self.goal_quests, len(self.goal_quest_pool))
         return list(self.dlc_location_ids)
 
     def apply_checked_location_ids(self, ids: set[int]) -> bool:
@@ -319,6 +327,16 @@ class Session:
     def on_quest_completed(self, quest: str) -> int | None:
         self.side_done.add(f"quest:{quest}")
         return self._report("quest", quest)
+
+    def on_lab_node(self, node: str) -> int | None:
+        return self._report("lab", node)
+
+    def lab_values(self) -> dict[tuple[int, int], int]:
+        """Stored lab rewards ((block, offset) -> value) that follow received items; empty without lab checks."""
+        if not self.ids["lab"] or not self.include_dlc:
+            return {}
+        from ..data_lab import lab_values
+        return lab_values(self.upgrades, self.lab_items)
 
     def on_korok_found(self, korok: str) -> int | None:
         return self._report("korok", korok)
@@ -419,6 +437,9 @@ class Session:
         if copies:
             got = min(self.upgrades.get("Progressive Weapon Capacity", 0), copies)
             values[WEAPON_CAPACITY_LEVEL] = min(WEAPON_CAPACITY_MAX, -(-got * WEAPON_CAPACITY_MAX // copies))
+            if self.ids["lab"] and self.include_dlc:  # the lab's capacity nodes add to the same byte
+                from ..data_lab import lab_capacity
+                values[WEAPON_CAPACITY_LEVEL] += lab_capacity(self.upgrades)
         return values
 
     def mission_reward_rows(self) -> dict[int, bytes]:
@@ -465,13 +486,15 @@ class Session:
         # A quest of a group the seed leaves vanilla keeps the reward the game gave for it, even on a byte an item
         # group forces (Sweeten the Research's sensor levels share bytes with Feed the Research).
         done = self.game_done | self.done["quest"]
+        held = {q for item in active for q in ALL_GROUPS[item].known}
         for item, group in ALL_GROUPS.items():
             if group.kind != "store" or item in active:
                 continue
             for i, quest in enumerate(group.known):
-                if quest in done:
+                # (Not a quest an active item holds: since 0.9.78 "Progressive Recipe" and the like are inactive parents of
+                # individual items, and this used to hand a bought quest's reward back without its item. Found live 2026-11-04.)
+                if quest in done and quest not in held:
                     merge({(b, o): v for b, o, v in group.writes[i] if (b, o) in values})
-        held = {q for item in active for q in ALL_GROUPS[item].known}
         for key, quests in SHARED_COUNTERS.items():  # a counter of every quest of its type, whatever its group
             if key in values:  # (rewarded by an item, or handed in where no item holds it)
                 values[key] = sum(1 for q in quests if q in given or (q in done and q not in held))
@@ -721,6 +744,11 @@ class Session:
         side mission you complete (a new seed showed "Side 23/30" before anything was played - user, 2026-11-02)."""
         return sum(1 for n in self.side_done if not (n.startswith("quest:") and n[6:] in self.open_quests))
 
+    @property
+    def quests_done(self) -> int:
+        """Quests completed that count for goal_quests."""
+        return sum(1 for n in self.side_done if n.startswith("quest:") and n[6:] in self.goal_quest_pool)
+
     def waiting_for_heroes(self) -> dict[str, list[str]]:
         """Missions and challenges that are otherwise open (unlock item in, or opened by the random order) but stay
         closed until the heroes the game forces into them are yours: name -> heroes still missing. User 2026-11-02:
@@ -770,7 +798,7 @@ class Session:
         needed = min(self.goal_story_missions - exclude_final, len(missions))
         if sum(m in self.cleared_missions or m in self.challenges_done for m in missions) < needed:
             return False
-        if self.side_count < self.goal_side_missions:
+        if self.side_count < self.goal_side_missions or self.quests_done < self.goal_quests:
             return False
         if self.goal_difficulty and sum(m in self.difficulty_cleared for m in missions) < needed:
             return False
@@ -790,6 +818,8 @@ class Session:
                  + (f" ending with {self.final_mission}" if self.final_goal else "")]
         if self.goal_challenges:
             parts.append(f"{self.goal_challenges} challenges")
+        if self.goal_quests:
+            parts.append(f"{self.goal_quests} quests")
         if self.goal_side_missions:
             parts.append(f"{self.goal_side_missions} challenges or quests")
         if self.goal == 2:
@@ -811,6 +841,8 @@ class Session:
         if self.goal_challenges:
             done = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
             parts.append(f"Challenges {len(self.goal_challenge_pool & done)}/{self.goal_challenges}")
+        if self.goal_quests:
+            parts.append(f"Quests {self.quests_done}/{self.goal_quests}")
         if self.goal_side_missions:
             parts.append(f"Side {self.side_count}/{self.goal_side_missions}")
         if self.goal == 2:
@@ -835,6 +867,8 @@ class Session:
         if self.goal_challenges:
             done = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
             lines.append(f"Goal: {len(self.goal_challenge_pool & done)}/{self.goal_challenges} challenges cleared{on}")
+        if self.goal_quests:
+            lines.append(f"Goal: {self.quests_done}/{self.goal_quests} quests completed")
         if self.goal_side_missions:
             lines.append(f"Goal: {self.side_count}/{self.goal_side_missions} challenges or quests completed")
         if self.goal == 2:

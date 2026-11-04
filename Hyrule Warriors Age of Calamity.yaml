@@ -4,59 +4,60 @@ requires:
   version: 0.6.7
 
 Hyrule Warriors Age of Calamity:
-  # --- Characters ---
-  starting_character_count: 4          # random starting heroes (1-20)
-  # starting_character_pool: [Link, Impa, Zelda, ...]   # default: all 18 base heroes
+  # --- Game mode and goal ---
+  game_mode: standard                  # standard | story_only (all checks on story missions) | challenges_only
   include_dlc: true                    # Expansion Pass (both waves); false if you don't have it
-
-  # --- Checks ---
-  weapon_checks: false                 # weapon pickups hold checks (off by default)
-  challenge_checks: true               # challenge missions hold checks
-  quest_checks: true                   # side quests hold checks
-  side_check_density: 100              # % of quests/challenges that hold checks (5-100)
-  weapon_items: 20                     # weapons shuffled in as items (0-164)
-  mission_rewards: vanilla             # vanilla | shuffled (each mission gives another's rewards) | none
-
-  # --- Story ---
-  mission_order: shuffle_all           # vanilla | shuffle_within_chapter | shuffle_all (ignored with mission_unlocks: items)
-  first_mission: random_any            # random_any | random_early (chapters 1-2) | vanilla; Hyrule Field comes pre-cleared (starter save)
-  mission_unlocks: items               # story_order | items (each story mission opens with its "Unlock:" item)
-  starting_mission_unlocks: 2          # with items: early-mission unlocks you start with (1-5)
-  side_missions_per_unlock: 0          # >0: each later story slot needs that many side missions per position
-  story_party: free                    # free (any party) | vanilla (story-forced heroes must be unlocked)
-  challenge_unlock_order: randomized   # randomized = a few open, 2-4 more challenges/quests per completion | vanilla
-  quest_unlock_order: randomized       # randomized | vanilla (the game's own quest order)
-  post_story_unlock: 10                # post-story challenges/quests mixed in before the goal (20 = vanilla, no checks on them)
-
-  # --- Goal ---
-  game_mode: standard                  # standard | story_only (every check on story missions, each clear opens the next) | challenges_only (every check on challenges)
-  goal: story                          # story | story_and_side_missions | story_and_all_characters
-  final_mission_goal: true             # The Future of Hyrule opens after the clears below and winning = clearing it
-  goal_story_missions: 20              # story clears needed (2-28; 20 base + 8 DLC; more than the seed has = all)
+  final_mission_goal: true             # The Future of Hyrule opens after the clears below, and clearing it wins
+  goal_story_missions: 20              # story clears needed (2-28: 20 base + 8 DLC; more than the seed has = all)
   goal_challenges: 25                  # challenge clears also needed (0-168)
-  region_hope_checks: false            # "The Hope of <region>" (100% of a region) holds a check
-  goal_side_missions: 25               # used by story_and_side_missions
+  goal_quests: 0                       # quests also needed (0 = none)
+  goal_all_heroes: false               # the goal also needs every hero
   goal_difficulty: any                 # any | easy | normal | hard | very_hard | apocalyptic (harder counts for easier)
+
+  # --- What holds checks ---
+  challenge_checks: true               # challenge missions
+  quest_checks: true                   # map quests
+  lab_checks: true                     # Royal Ancient Lab nodes (35, all open; needs include_dlc)
+  weapon_checks: false                 # weapon pickups
+  side_check_density: 100              # % of quests and challenges that hold checks (5-100)
+  region_hope_checks: false            # "The Hope of <region>" (100% of a region)
   difficulty_checks: off               # off | normal | hard | very_hard: one more check per mission for each harder difficulty
   difficulty_checks_challenges: true   # challenges get those per-difficulty checks too
   difficulty_lock: off                 # off | normal | hard | very_hard: clears on easier difficulties count for nothing
 
-  # --- Pace ---
+  # --- Story ---
+  mission_unlocks: items               # story_order | items (each story mission opens with its "Unlock:" item)
+  starting_mission_unlocks: 2          # with items: early-mission unlocks you start with (1-5)
+  first_mission: random_any            # random_any | random_early (chapters 1-2) | vanilla
+  mission_order: shuffle_all           # vanilla | shuffle_within_chapter | shuffle_all (ignored with mission_unlocks: items)
+  story_party: free                    # free (any party) | vanilla (story-forced heroes must be unlocked)
+  side_missions_per_unlock: 0          # >0: each later story slot needs that many side missions per position
+
+  # --- Challenges and quests ---
+  challenge_unlock_order: randomized   # randomized: a few open, 2-4 more per completion | vanilla
+  quest_unlock_order: randomized       # randomized | vanilla (the game's own quest order)
+  post_story_unlock: 10                # post-story challenges/quests mixed in before the goal (20 = vanilla, no checks there)
+  challenge_logic: after_story         # with challenge_unlock_order: vanilla: after_story | by_level
+  weapon_check_logic: after_story      # after_story | after_character
+
+  # --- Heroes ---
+  starting_character_count: 4          # random starting heroes (1-20)
+  # starting_character_pool: [Link, Impa, Zelda]   # default: all 18 base heroes
   minimum_character_level: 1           # heroes are raised to at least this level (1-100)
   catch_up_levels: true                # new heroes join at your lowest hero's level
   hero_level_cap: false                # heroes go back to 99 after reaching 100 (level-ups still refill)
-  goal_banner: true                    # goal progress banner at the top of the emulator while on the map
 
   # --- Open from the start ---
   start_with_sheikah_sensor: true      # the Sheikah Sensor works from the first mission
   start_with_trackers: false           # treasure and Korok trackers already done
-  open_stables: true                   # every stable open, no stable checks/items
   open_shops: true                     # every shop open (but the dye shop), no shop checks/items
+  open_stables: true                   # every stable open, no stable checks/items
   open_dye_shop: true                  # the dye shop open, no check
 
-  # --- Logic ---
-  challenge_logic: after_story         # with challenge_unlock_order: vanilla: after_story | by_level
-  weapon_check_logic: after_story      # after_story | after_character
+  # --- Locked features ---
+  weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
+  locked_features: [Terrako Guardian, Fairy Fountains]  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian
+  sheikah_runes: shuffled              # vanilla | shuffled | start_with_all
 
   # --- Upgrade items ---
   heart_containers: 1                  # per hero (0-5)
@@ -65,30 +66,32 @@ Hyrule Warriors Age of Calamity:
   enhanced_abilities: 1                # per hero (0-3)
   weapon_capacity_upgrades: 5          # (0-10)
   seal_slot_upgrades: 2                # (0-2)
-  weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
-  locked_features: [Terrako Guardian, Fairy Fountains]  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian (cooking is open unless listed)
-  sheikah_runes: shuffled              # vanilla | shuffled | start_with_all
-  # quest_reward_items: {...}          # which quest rewards are items (0 = vanilla); default = all but shops and stables
+  weapon_items: 20                     # weapons shuffled in as items (0-164; lab weapons and royal gifts are always in)
+  # quest_reward_items: {...}          # copies of each quest reward item; default = every quest reward
 
-  # --- Filler ---
+  # --- Filler and mission rewards ---
   filler_weights:
     Character XP Gift: 20
-    Extra Weapon: 10                       # 1 random weapon for a hero you have
-    Weapon Bundle: 12                      # 3 weapons, for different heroes
-    Large Weapon Bundle: 6                 # 5 weapons, for different heroes
+    Extra Weapon: 10                   # 1 random weapon for a hero you have
+    Weapon Bundle: 12                  # 3 weapons, for different heroes
+    Large Weapon Bundle: 6             # 5 weapons, for different heroes
     Rupee Pouch: 12
-    Small Material Bundle: 15              # 10 each of 3 materials
-    Material Bundle: 20                    # 15 each of 5 materials
-    Large Material Bundle: 10              # 25 each of 8 materials
+    Small Material Bundle: 15          # 10 each of 3 materials
+    Material Bundle: 20                # 15 each of 5 materials
+    Large Material Bundle: 10          # 25 each of 8 materials
     Hearty Meal: 5
   local_filler: false                  # keep all filler in your own world
-  steady_rewards: true                 # story clears never hold your own filler
-  story_pacing: 0                      # % of your heroes/upgrades/weapons spread over the story (0 = random)
+  mission_rewards: vanilla             # vanilla | shuffled (each mission gives another's rewards) | none
 
-  # --- Helpers ---
-  mission_hint_every: 0                # free hint every N story clears (0 = off)
-  stuck_rescue_minutes: 30             # a hint after this many minutes without a new check (0 = off)
-  featured_challenge: false            # one random challenge becomes a priority location
+  # --- Hints and help ---
   hint_mission_unlocks: true           # free hints for every mission unlock item
   hint_heroes: true                    # free hints for every hero
+  mission_hint_every: 0                # free hint every N story clears (0 = off)
+  stuck_rescue_minutes: 30             # a hint after this many minutes without a new check (0 = off)
+  goal_banner: true                    # goal progress banner at the top of the emulator while on the map
+  featured_challenge: false            # one random challenge becomes a priority location
+
+  # --- Multiworld pacing ---
+  steady_rewards: true                 # story clears never hold your own filler
+  story_pacing: 0                      # % of your heroes/upgrades/weapons spread over the story (0 = random)
   death_link: false                    # a death elsewhere restarts your mission (ignored outside missions)

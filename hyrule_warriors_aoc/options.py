@@ -57,14 +57,14 @@ class GameMode(Choice):
 
 class Goal(Choice):
     """
-    What you need on top of the story missions to finish.
+    Older form of the goal (new YAMLs use goal_quests and goal_all_heroes).
 
-    Story: only the story missions (goal_story_missions) and challenges (goal_challenges).
-    Story And Side Missions: also complete goal_side_missions challenges or quests.
-    Story And All Characters: also unlock every hero.
+    Story: only the goal counts. Story And Side Missions: also goal_side_missions challenges or quests.
+    Story And All Characters: also every hero.
     """
 
-    display_name = "Goal"
+    display_name = "Goal (old form)"
+    visibility = Visibility.none
     option_story = 0
     option_story_and_side_missions = 1
     option_story_and_all_characters = 2
@@ -100,14 +100,30 @@ class GoalChallenges(Range):
     default = 25  # (user, 2026-11-02: default run review)
 
 
+class GoalQuests(Range):
+    """
+    How many map quests the goal also needs, in any order (0 = none).
+
+    Only quests that hold checks count, so quest_checks must be on. Lowered to the number your seed has.
+    """
+
+    display_name = "Goal Quests"
+    range_start = 0
+    range_end = 300
+    default = 0
+
+
+class GoalAllHeroes(Toggle):
+    """The goal also needs every hero unlocked."""
+
+    display_name = "Goal Needs Every Hero"
+
+
 class GoalSideMissions(Range):
-    """
-    With goal: Story And Side Missions, how many challenges or quests you must complete.
+    """Older form: with goal: Story And Side Missions, how many challenges or quests must be completed."""
 
-    Lowered automatically if your seed has fewer.
-    """
-
-    display_name = "Goal Side Missions"
+    display_name = "Goal Side Missions (old form)"
+    visibility = Visibility.none
     range_start = 1
     range_end = 300
     default = 25
@@ -118,7 +134,7 @@ class FinalMissionGoal(DefaultOnToggle):
     Make The Future of Hyrule (the last story mission) the final goal.
 
     It stays closed, with no unlock item, until you have everything else the goal needs (goal_story_missions - 1 other
-    story missions, goal_challenges challenges and the goal option's extras). Then it opens, and clearing it wins.
+    story missions, goal_challenges, goal_quests and goal_all_heroes). Then it opens, and clearing it wins.
     Off: the goal completes as soon as you have those clears, in any order.
     """
 
@@ -277,6 +293,18 @@ class SideContent(OptionSet):
     visibility = Visibility.none
     valid_keys = frozenset(SIDE_CATEGORIES)
     default = frozenset({"Challenges", "Quests"})
+
+
+class LabChecks(DefaultOnToggle):
+    """
+    Every research node in the Royal Ancient Lab holds a check, and its reward becomes an item.
+
+    All 35 nodes are open from the start: the client removes the game's unlock order. Each node still needs its materials
+    and its own condition (such as "use Remote Bombs to defeat 100 enemies"), and the logic accounts for them. The two relic
+    nodes ask for The Future of Hyrule: with final_mission_goal they hold no checks. Needs include_dlc. Off: the lab is left as the game has it.
+    """
+
+    display_name = "Lab Checks"
 
 
 class SideCheckDensity(Range):
@@ -686,8 +714,8 @@ class QuestRewardItems(OptionCounter):
     Groups of different rewards (recipes, shops, stables, regional discounts, Smithy upgrades, research quests, dyes,
     Divine Beast upgrades, Expansion Pass reward quests) become one item per reward, named after its quest (for
     example "Recipe (A Feast of Greens)"): any value above 0 turns on the whole group.
-    Most rewards are given by their items directly. A few (research quests, Maz Koshia's trials, the Expansion Pass
-    reward quests) instead keep their quest closed until the item arrives; you then complete it for the game's reward.
+    Rewards are given by their items directly; buying the quest only sends its check. Maz Koshia's trials are the one
+    exception: each trial is the next fight, so its quest stays closed until the item arrives.
     By default every group is on except shops and stables. Groups other than the directly-given ones need
     quest_checks.
     """
@@ -830,6 +858,7 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     weapon_checks: WeaponChecks
     challenge_checks: ChallengeChecks
     quest_checks: QuestChecks
+    lab_checks: LabChecks
     side_content: SideContent
     side_check_density: SideCheckDensity
     include_dlc: IncludeDLC
@@ -840,6 +869,8 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     story_party: StoryParty
     goal: Goal
     goal_side_missions: GoalSideMissions
+    goal_quests: GoalQuests
+    goal_all_heroes: GoalAllHeroes
     goal_difficulty: GoalDifficulty
     difficulty_checks: DifficultyChecks
     difficulty_checks_challenges: DifficultyChecksChallenges
@@ -890,25 +921,25 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     start_inventory_from_pool: StartInventoryPool
 
 
-# Groups in the order a new player decides things (2026-11-02): what kind of run, how the story opens, what holds
-# checks, how side content opens, then heroes, services, items, hints and pacing.
+# Groups in the order a new player decides things (reordered 2026-11-04): what kind of run and what wins it, what holds
+# checks, how story and side content open, then heroes, services, items, hints and pacing. Hidden older options sit in
+# no group.
 option_groups = [
-    OptionGroup("Game Mode and Goal", [GameMode, Goal, GoalStoryMissions, GoalChallenges, GoalSideMissions,
-                                       FinalMissionGoal, GoalDifficulty]),
+    OptionGroup("Game Mode and Goal", [GameMode, IncludeDLC, FinalMissionGoal, GoalStoryMissions, GoalChallenges, GoalQuests,
+                                       GoalAllHeroes, GoalDifficulty]),
+    OptionGroup("What Holds Checks", [ChallengeChecks, QuestChecks, LabChecks, WeaponChecks, SideCheckDensity,
+                                      RegionHopeChecks, DifficultyChecks, DifficultyChecksChallenges, DifficultyLock]),
     OptionGroup("Story", [MissionUnlocks, StartingMissionUnlocks, FirstMission, MissionOrder, StoryParty,
                           SideMissionsPerUnlock]),
-    OptionGroup("Checks", [ChallengeChecks, QuestChecks, WeaponChecks, SideCheckDensity, RegionHopeChecks,
-                           DifficultyChecks, DifficultyChecksChallenges, DifficultyLock]),
-    OptionGroup("Side Content Unlocks", [ChallengeUnlockOrder, QuestUnlockOrder, PostStoryUnlock, ChallengeLogic,
-                                         WeaponCheckLogic, SideUnlocks]),
-    OptionGroup("Expansion Pass", [IncludeDLC]),
+    OptionGroup("Challenges and Quests", [ChallengeUnlockOrder, QuestUnlockOrder, PostStoryUnlock, ChallengeLogic,
+                                          WeaponCheckLogic]),
     OptionGroup("Heroes", [StartingCharacterCount, StartingCharacterPool, MinimumCharacterLevel, CatchUpLevels,
                            HeroLevelCap]),
-    OptionGroup("Services and Features", [StartWithSheikahSensor, StartWithTrackers, OpenShops, OpenStables,
-                                          OpenDyeShop, WeaponFusion, LockedFeatures, SheikahRunes]),
-    OptionGroup("Items", [HeartContainers, ComboUpgrades, SpecialGaugeUpgrades, EnhancedAbilities,
-                          WeaponCapacityUpgrades, SealSlotUpgrades, WeaponItems, QuestRewardItems, MissionRewards,
-                          FillerWeights, LocalFiller]),
+    OptionGroup("Open from the Start", [StartWithSheikahSensor, StartWithTrackers, OpenShops, OpenStables, OpenDyeShop]),
+    OptionGroup("Locked Features", [WeaponFusion, LockedFeatures, SheikahRunes]),
+    OptionGroup("Upgrade Items", [HeartContainers, ComboUpgrades, SpecialGaugeUpgrades, EnhancedAbilities,
+                                  WeaponCapacityUpgrades, SealSlotUpgrades, WeaponItems, QuestRewardItems]),
+    OptionGroup("Filler and Mission Rewards", [FillerWeights, LocalFiller, MissionRewards]),
     OptionGroup("Hints and Help", [HintMissionUnlocks, HintHeroes, MissionHintEvery, StuckRescueMinutes, GoalBanner,
                                    FeaturedChallenge]),
     OptionGroup("Multiworld Pacing", [SteadyRewards, StoryPacing]),
@@ -916,7 +947,7 @@ option_groups = [
 
 presets = {
     # Plain-language entry points; everything else is a detail.
-    "Story": {"weapon_checks": False, "challenge_checks": False, "quest_checks": False},
+    "Story": {"weapon_checks": False, "challenge_checks": False, "quest_checks": False, "lab_checks": False},
     "Standard": {"weapon_checks": True, "challenge_checks": True, "quest_checks": False, "mission_hint_every": 4},
     "Everything": {
         "weapon_checks": True, "challenge_checks": True, "quest_checks": True,

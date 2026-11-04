@@ -278,6 +278,7 @@ class AoCContext(CommonContext):
         self._challenges_logged = False
         self._first_mission_noted = False
         self._quest_rows_ok = True
+        self._lab_ok = self._quest_table_ok = True
         self._selection: tuple[int, int] | None = None
         self._selection_pages: list[str] = []
         self._selection_page = 0
@@ -380,7 +381,8 @@ class AoCContext(CommonContext):
             return
         ignore = self.delivery.baseline(cleared_missions(data) | completed_quests(data) | owned_weapons(data))
         self.save_watcher = SaveWatcher(self.save_path, ignore=ignore, on_ignore_change=self.delivery.set_baseline)
-        if ignore and self.save_path not in self.delivery.state.get("starter", {}):  # (a starter save's clears are expected)
+        # (a starter save's clears are expected; another seed's save is about to be swapped for one)
+        if ignore and self.save_path not in self.delivery.state.get("starter", {}) and not self.save_belongs_elsewhere():
             logger.warning("%d clears were already in this save before the seed started; they will NOT count as checks. "
                            "For a full run, start a New Game (back up your save first).", len(ignore))
 
@@ -508,6 +510,7 @@ class AoCContext(CommonContext):
                     logger.warning("Mission rewards stay vanilla: %s", e)
             if self.live.set_reward_bytes(self.session.reward_writes()):
                 probe_logger.info("Quest rewards set from received items.")
+            await self._lab_tick()
             states = self.session.quest_states()
             if quests := self.live.set_quest_states(states):
                 probe_logger.info("Services (quest states) set from received items: %s", ", ".join(quests))
@@ -583,6 +586,23 @@ class AoCContext(CommonContext):
             self.live.close()
             self.live = None
             self.overlay.set_banner(None)
+
+    async def _lab_tick(self) -> None:
+        """Royal Ancient Lab nodes as checks, and quest rows emptied of the rewards their items give (0.9.81)."""
+        session, live = self.session, self.live
+        if not session.include_dlc:
+            return
+        try:
+            if session.emptied_quests and self._quest_table_ok:
+                if quests := live.empty_quest_rows(session.emptied_quests):
+                    probe_logger.info("Rewards taken out of %d quest rows (their items give them).", len(quests))
+            if session.ids["lab"] and self._lab_ok:
+                for node in live.sync_lab(session.lab_values(), set(session.ids["lab"])):
+                    if node not in session.done["lab"]:
+                        await self._on_game_message({"type": "lab_node", "name": node})
+        except Exception as e:  # never let this feature drop the game connection (tried again on reconnect)
+            self._lab_ok = self._quest_table_ok = False
+            logger.warning("Royal Ancient Lab control is off: %s", e)
 
     async def _hold_death_loop(self) -> None:
         """A received death holds the party at 0 until the KO, or the mission or attempt ends: a healing item or a hero
@@ -1061,6 +1081,8 @@ class AoCContext(CommonContext):
             location_id = self.session.on_quest_completed(str(message.get("quest")))
         elif kind == "korok_found":
             location_id = self.session.on_korok_found(str(message.get("korok")))
+        elif kind == "lab_node":
+            location_id = self.session.on_lab_node(str(message.get("name")))
         elif kind == "player_died":
             if self.session.death_link:
                 await self.send_death(f"{self.player_names.get(self.slot, 'A hero')} fell in Hyrule")

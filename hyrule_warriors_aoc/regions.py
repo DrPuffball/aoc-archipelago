@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from BaseClasses import Item, ItemClassification, Region
 
 from .locations import (
+    lab_location,
     AgeOfCalamityLocation,
     challenge_location,
     create_location,
@@ -93,6 +94,8 @@ def create_regions(world: AgeOfCalamityWorld) -> None:
         _event(world, side, f"Event: Quest {name}", quest_event(name))
         if name in world.checked_quests:
             create_location(world, side, quest_location(name))
+    for name in world.checked_lab:
+        create_location(world, side, lab_location(name))
     for source, kind, index in world.checked_koroks:
         create_location(world, side, korok_location(source, index))
     for name in world.checked_weapons:

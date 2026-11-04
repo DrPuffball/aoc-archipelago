@@ -8,6 +8,7 @@ from BaseClasses import Location
 from .data import GAME_NAME, LOCATION_ID_BASE, MISSIONS, WEAPONS
 from .data_challenges import CHALLENGES
 from .data_koroks import KOROKS_IN_CHALLENGES, KOROKS_IN_MISSIONS, korok_location
+from .data_lab import LAB_NODES
 from .data_quests import QUESTS
 
 if TYPE_CHECKING:
@@ -56,6 +57,10 @@ def challenge_location(name: str) -> str:
     return f"Challenge: {name}"
 
 
+def lab_location(name: str) -> str:
+    return f"Lab: {name}"
+
+
 # Korok seeds as (source, kind, index); kind "mission" or "challenge".
 KOROKS: list[tuple[str, str, int]] = [
     (src, "mission", i + 1) for src, n in KOROKS_IN_MISSIONS.items() for i in range(n)
@@ -77,11 +82,12 @@ _RANGES = {
     # 0.9.74: the DLC story missions are story missions, so they hold as many bonus checks as one (6..50)
     "dlc_story_bonus": (5000, [challenge_bonus_location(c, k) for c in DLC_STORY_MISSIONS
                                for k in range(BONUS_PER_CHALLENGE + 1, BONUS_PER_MISSION + 1)]),
+    "lab": (5400, [lab_location(n.name) for n in LAB_NODES]),  # 0.9.81: Royal Ancient Lab nodes
 }
 LOCATION_NAME_TO_ID: dict[str, int] = {}
 for _start, _names in _RANGES.values():
     assert len(_names) <= {0: 100, 100: 600, 700: 300, 1000: 200, 1200: 200, 1400: 400, 1800: 600, 2400: 1100, 3500: 1500,
-                       5000: 400}[_start],         _start
+                       5000: 400, 5400: 100}[_start],         _start
     for _i, _name in enumerate(_names):
         assert _name not in LOCATION_NAME_TO_ID, _name
         LOCATION_NAME_TO_ID[_name] = LOCATION_ID_BASE + _start + _i

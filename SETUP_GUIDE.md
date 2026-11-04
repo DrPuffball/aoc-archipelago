@@ -1,4 +1,6 @@
-# Setup guide: Hyrule Warriors: Age of Calamity in Archipelago
+# Setup guide: Hyrule Warriors: Age of Calamity in Archipelago
+
+Going forward, development focuses on the Eden emulator: new features are built and tested on Eden first. The new Royal Ancient Lab features in 0.9.81 have been tested on Eden only.
 
 For a new player, from nothing to playing. Windows only: the client works with the emulator's memory. Two emulators
 are supported, **Ryujinx** and **Eden**. The client detects which one you are using.
@@ -37,17 +39,17 @@ the multiworld (they need the apworld too). Every option has a tooltip; good def
 most people change:
 
 - `starting_character_count`: how many random heroes you start with (default 4).
-- `challenge_checks`, `quest_checks`, `weapon_checks`: which side content holds checks (default: challenges and
-  quests on, weapons off).
+- `challenge_checks`, `quest_checks`, `lab_checks`, `weapon_checks`: what holds checks (default: challenges, quests and
+  the Royal Ancient Lab on, weapons off).
 - `challenge_unlock_order`, `quest_unlock_order`: randomized (a few open, 2-4 more after each completion) or vanilla.
 - `mission_unlocks`: `items` (default) = each story mission opens with its own item from the multiworld (you start
   with 2, hinted for free); `story_order` = in order. `first_mission` (default any) picks the starting ones.
-- `goal_story_missions`, `goal_challenges`: what the goal needs (default 20 of the 28 story missions and 25
+- `goal_story_missions`, `goal_challenges`, `goal_quests`, `goal_all_heroes`: what the goal needs (default 20 of the 28 story missions and 25
   challenges). With `final_mission_goal` (on), The Future of Hyrule opens once you have those and clearing it wins.
 - `game_mode`: `standard`, `story_only` (every check on story missions, each clear opens the next) or
   `challenges_only` (every check on challenges; no story missions or map quests).
 - `difficulty_checks` (extra checks for harder clears) or `difficulty_lock` (clears below a difficulty don't count).
-- "Start Open" group: Sheikah Sensor, stables, shops and the dye shop open from the start (on), trackers (off).
+- "Open from the Start" group: Sheikah Sensor, stables, shops and the dye shop open from the start (on), trackers (off).
 - `hint_mission_unlocks`, `hint_heroes`: free hints at the start. `hero_level_cap`: heroes stay at 99.
 - `death_link`: share deaths with the other players.
 
@@ -127,6 +129,5 @@ The full guide is `TROUBLESHOOTING.md`. The most common ones:
   challenges and quests hold checks, and Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts
   stay playable but never hold checks (except Forgotten Temple). Without the DLC in your emulator, the client
   takes the DLC out of the goal and sends its checks, so the seed stays winnable; or set include_dlc: false.
-- A few quest rewards (research quests, Maz Koshia's trials and the Expansion Pass reward quests) still open their quest: the item opens it and you complete it in game for its
-  reward (the client tells you which).
+- Maz Koshia's trials: each trial is the next fight, so its item opens the quest. Other quest rewards come straight from their items.
 - Ryujinx and Eden are both tested in full play (Eden 0.2.1).

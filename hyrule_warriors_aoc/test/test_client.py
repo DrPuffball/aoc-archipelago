@@ -1013,7 +1013,7 @@ class DlcFailsafeTests(WorldTestBase):
                  (loc.name for loc in self.multiworld.get_locations(self.player) if loc.address)}
         dlc = [names[i] for i in session.dlc_location_ids]
         self.assertTrue(dlc)
-        self.assertTrue(all(" EX " in f" {n.partition(': ')[2]}" or n.startswith("Obtain: ") for n in dlc), dlc[:5])
+        self.assertTrue(all(" EX " in f" {n.partition(': ')[2]}" or n.startswith(("Obtain: ", "Lab: ")) for n in dlc), dlc[:5])
         self.assertTrue(any(n.startswith("Challenge: EX ") for n in dlc) and any(n.startswith("Quest: EX ") for n in dlc))
         self.assertNotIn("Challenge: Road to the Ancient Lab", dlc)
         before = session.goal_challenges
@@ -1093,8 +1093,8 @@ class CollectedRewardQuestTests(WorldTestBase):
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         from ..data_rewards import SPLIT_INTO
         session.apply_received_item_names(["Feature: Cooking"] + SPLIT_INTO["Progressive Research Quest"])
-        known, unknown = "Hot Meals in a Pot", "Let's Dance"
-        self.assertIn(unknown, ALL_GROUPS["Research Reward (Let's Dance)"].known)
+        known, unknown = "Hot Meals in a Pot", "Let's Dance"  # (0.9.81: research rewards are direct, so it's done too)
+        self.assertIn(unknown, ALL_GROUPS["Research Rewards (Let's Dance)"].known)
         for q in (known, unknown):
             if q in session.ids["quest"]:
                 session.apply_checked_location_ids({session.ids["quest"][q]})
@@ -1102,7 +1102,7 @@ class CollectedRewardQuestTests(WorldTestBase):
                 session.collected_quests.add(q)
         states = session.quest_states()
         self.assertEqual(states[known], 3)
-        self.assertEqual(states[unknown], 2)
+        self.assertEqual(states[unknown], 3)
 
 
 class RecipeStoreTests(WorldTestBase):
