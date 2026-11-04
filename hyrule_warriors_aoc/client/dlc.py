@@ -58,15 +58,15 @@ def eden_enabled_dlc(root: str) -> set[int] | None:
 
 
 def missing_waves(data_dirs: list[str] | None = None, eden_roots: list[str] | None = None) -> list[str] | None:
-    """Expansion Pass waves not enabled in the emulator in use (when none runs: whichever has a record, Ryujinx
-    first); None when it can't tell."""
+    """Expansion Pass waves not enabled in the emulator in use; None when it can't tell, including when no single
+    emulator is running (another emulator's list says nothing about the one you play on)."""
     from .ryujinx import emulator_processes
     if data_dirs is None and eden_roots is None:
         from .savewatch import eden_data_roots
         running = {name for _, name in emulator_processes()}
-        sources = [("Ryujinx", ryujinx_data_dirs()), ("Eden", eden_data_roots())]
-        if running == {"Eden"}:
-            sources.reverse()
+        if len(running) != 1:
+            return None
+        sources = [("Eden", eden_data_roots())] if running == {"Eden"} else [("Ryujinx", ryujinx_data_dirs())]
     else:
         sources = [("Ryujinx", data_dirs or []), ("Eden", eden_roots or [])]
     for emulator, dirs in sources:

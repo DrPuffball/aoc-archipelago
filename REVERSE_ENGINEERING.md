@@ -149,6 +149,14 @@ state id).
 | 43 | Divine Beast upgrade | row `+0x3B` = beast 1..4; profile `0x871 + beast` = 1 | [confirmed: Surveying the Volcano set 0x873] |
 | 35, 36, 48, ... | Maz Koshia trial, research, dyes, ... | see `tools/QUEST_TYPES.md` | unknown |
 
+Unknown rewards, read from recorded hand-ins (materials were at max, so some rewards can't show) [read, 2026-11-03]:
+- Maz Koshia trials (type 35): `[0x578]+0x2B0/2B2/2B4` u16 list + flag: Stones 358, Monsters 357 (and FLAGS `0x70F` = 4),
+  Mighty Foe 359. Offering Help on the Road changes nothing beyond its cost. They open Trial of the Ancients.
+- Research quests (type 36): quest table `+0x3A` material index + 1, `+0x3D` outfit id: every one has a material, and
+  Rumor about Skull Lake, Cold Desert Nights and Visiting a Special Shop add outfits 19, 20, 21. Amounts seen: 2-3.
+- Terrako's Return: profile `+0xB37` 2 -> 3 (meaning unknown). Hot Meals in a Pot: FLAGS `0x1A07`, profile `+0x2C3`.
+- Never handed in yet: 29 EX reward quests, Ancient-Material Delivery, Seething Malice, Reigning Malice, Fiery Inspiration.
+
 How the client uses this (`data_rewards.py`):
 - **store** groups: the reward item sets the bytes; the client forces them to what the received items give.
 - **quest** groups: the service follows the quest state, opened once the item arrives.

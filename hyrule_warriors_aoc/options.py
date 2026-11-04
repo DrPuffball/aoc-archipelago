@@ -446,8 +446,8 @@ class IncludeDLC(DefaultOnToggle):
     The Guardian of Remembrance missions count as story missions (goal and unlock items), the EX challenges and quests
     hold checks like the base game's, the DLC weapons are in, and Purah & Robbie, Sooga and the Battle-Tested Guardian
     are hero items. EX Alerts stay playable but hold no checks (except Forgotten Temple).
-    If your game turns out not to have the DLC, the client keeps the seed winnable: it takes the DLC out of the goal
-    and sends its checks.
+    If your emulator doesn't list the DLC, the client warns you; type /no_dlc to take it out of the goal and send its
+    checks, which keeps the seed winnable.
     """
 
     display_name = "Include DLC"

@@ -37,7 +37,7 @@ there are more items than checks, story and challenge clears get bonus checks (s
 the start (stables, shops, dye shop, Sheikah Sensor, the Expansion Pass's Ancient Tech Lab; options in the "Start Open" group) hold no check. Expansion Pass
 content (on by default with `include_dlc`) is treated like the base game's: the 8 Guardian of Remembrance missions
 are story missions (goal, unlock items), EX challenges and quests are checks, and the DLC heroes are items. Without
-the DLC in your emulator the client takes it out of the goal and sends its checks.
+the DLC in your emulator the client warns you, and `/no_dlc` takes it out of the goal and sends its checks.
 
 **Items**
 - Heroes: you start with `starting_character_count` (default 4) random heroes from `starting_character_pool`;

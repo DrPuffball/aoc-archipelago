@@ -48,6 +48,7 @@ STARTER_NOTE = ("This seed skips the forced first mission, but the starter save 
                 "and you then pick Continue. Type /starter_save to force it.")
 
 REFRESH_HINT_SECONDS = 20  # how long the "pause and go back to the map" banner stays after a new seed's setup
+FLOW_PAUSED = 0x60  # mission flow state of the pause menu
 DEATH_HOLD_SECONDS = 0.1  # how often a received death re-zeroes the party's health
 TIP_SECONDS = 30  # how long a banner tip (what to do next) stays on the map
 TITLE_HINT_SECONDS = 120  # the game is up but unreadable this long: from "pick Continue" to "see the client window"
@@ -121,15 +122,24 @@ class AoCCommandProcessor(ClientCommandProcessor):
         self.output("\n".join(lines) if lines else
                     "Nothing to copy: " + (", ".join(ctx.own_saves()) or "no save of this seed found") + ".")
 
-    def _cmd_probe(self, state: str = "") -> None:
-        """Research probe for testers (off by default): records what the game did with each randomizer change in
-        AoC_Archipelago/probe. "/probe on" or "/probe off"; it starts or stops when the game is next found."""
+    def _cmd_no_dlc(self) -> None:
+        """Your game has no Expansion Pass: takes it out of this seed's goal and sends its checks. This can't be undone."""
+        self.ctx.confirm_no_dlc()
+
+    def _cmd_research(self, state: str = "") -> None:
+        """Game research for testers (off by default): records what the game did with each randomizer change in
+        AoC_Archipelago/research, to help improve the randomizer. It only reads the game, and nothing leaves your PC.
+        "/research on" or "/research off"; it starts or stops when the game is next found."""
         from .settings import load_settings, save_setting
         if state.lower() in ("on", "off"):
             save_setting("research_probe", state.lower() == "on")
             if state.lower() == "off" and self.ctx.probe:
                 self.ctx.probe.enabled = False
-        self.output("Research probe: " + ("on" if load_settings().get("research_probe") else "off"))
+        self.output("Game research: " + ("on" if load_settings().get("research_probe") else "off"))
+
+    def _cmd_probe(self, state: str = "") -> None:
+        """Old name of /research."""
+        self._cmd_research(state)
 
     def _cmd_goal_banner(self, state: str = "") -> None:
         """The goal progress banner at the top of the emulator window while you're on the world map. "/goal_banner on"
@@ -258,7 +268,10 @@ class AoCContext(CommonContext):
         self._cap_seen: dict[str, float] = {}  # hero -> when they were first seen above the level cap
         self._last_hp: float | None = None
         self._death_hold = False  # DeathLink: a received death holds your HP at 0 until the next hit
+        self._dlc_warned = False  # the Expansion Pass question was asked
         self._death_hold_task: asyncio.Task | None = None
+        self._death_hold_source: str | None = None
+        self._no_check_noted: set[str] = set()
         self.probe = None
         self._probe_task: asyncio.Task | None = None
         self._open_logged: set[str] = set()
@@ -420,6 +433,7 @@ class AoCContext(CommonContext):
             if self.save_path and self.delivery and self._shelf().owner(self.save_path) is None:
                 self._shelf().set_owner(self.save_path, self.delivery.state_file.stem)  # the save this seed plays on
             self._start_probe()
+            self._dlc_failsafe()  # (now the emulator in use is known)
             logger.info("Connected to Age of Calamity in %s: story and challenge clears are sent the moment "
                         "they happen; Rupee Pouch, Material Bundle and Character XP Gift arrive in game.",
                         "Eden" if type(self.live.g).__name__ == "FastmemGuest" else "Ryujinx")
@@ -598,6 +612,7 @@ class AoCContext(CommonContext):
                 logger.info("DeathLink: %s died. Your health is at 0: the next hit defeats you.", self._pending_kill)
                 self.overlay.show(f"DeathLink: {self._pending_kill} died")
                 self._audit({"finding": "deathlink", "direction": "applied", "source": self._pending_kill, "hp_was": hp})
+                self._death_hold_source = self._pending_kill
                 self._pending_kill = None
                 self._death_hold = True
                 self._death_hold_task = asyncio.create_task(self._hold_death_loop(), name="DeathLink hold")
@@ -635,12 +650,12 @@ class AoCContext(CommonContext):
         from .delivery import STATE_DIR
         from .probe import Probe
         from .settings import load_settings
-        if not load_settings().get("research_probe"):  # testers only: "/probe on"
+        if not load_settings().get("research_probe"):  # testers only: "/research on"
             return
 
         if self._probe_task and not self._probe_task.done():
             return
-        self.probe = Probe(self.live.g, STATE_DIR / "probe")
+        self.probe = Probe(self.live.g, STATE_DIR / "research")
 
         async def loop() -> None:
             while self.live is not None and self.probe and self.probe.enabled:
@@ -669,9 +684,13 @@ class AoCContext(CommonContext):
             logger.info("Starter save: gave a starter weapon and level-1 stats to %s.", ", ".join(primed))
 
     def _dlc_failsafe(self) -> None:
-        """A seed with the Expansion Pass on a game without it (read from the emulator's DLC list): the goal drops the
-        EX challenges and the DLC checks are sent, so the seed stays winnable and nothing waits on unplayable content."""
+        """A seed with the Expansion Pass on a game whose emulator doesn't list it: say so and ask. Sending checks can't be
+        undone, and an emulator's list can be wrong or out of date (Discord report, 2026-11-03: a player with the DLC lost
+        every DLC check on connecting), so this only reads the emulator actually running, and only /no_dlc acts on it."""
         if not self.session.include_dlc or not self.session.dlc_location_ids:
+            return
+        if self.delivery and self.delivery.state.get("no_dlc"):  # confirmed before: keep the goal without the DLC
+            self.session.drop_dlc()
             return
         from .dlc import missing_waves
         try:
@@ -679,16 +698,28 @@ class AoCContext(CommonContext):
         except Exception as e:  # never let this check break connecting
             logger.debug("DLC check failed: %s", e)
             return
-        if not missing:
-            return  # installed, or the emulator can't tell (no DLC list): nothing changes
+        if not missing or self._dlc_warned:
+            return  # installed, nothing running to ask, or the emulator can't tell: nothing changes
+        self._dlc_warned = True
+        logger.warning("Expansion Pass not detected: your emulator doesn't list %s. If you don't have it, type /no_dlc in "
+                       "this window: it releases this seed's DLC checks and takes the DLC out of your goal (this can't be "
+                       "undone). If you do have it, check it's installed and enabled for the game, and ignore this.",
+                       " / ".join(missing))
+        self.overlay.show("Expansion Pass not detected: see the client window")
+        self._tip("Expansion Pass not detected. Don't have it? Type /no_dlc in the client to release its checks", 90)
+
+    def confirm_no_dlc(self) -> None:
+        """/no_dlc: the player says the game has no Expansion Pass: the goal drops it and its checks are sent."""
+        if not self.session or not self.session.dlc_location_ids:
+            logger.info("This seed has no Expansion Pass content.")
+            return
+        if self.delivery:
+            self.delivery.state["no_dlc"] = True
+            self.delivery.save_state()
         ids = self.session.drop_dlc()
         left = [i for i in ids if i not in self.checked_locations]
-        logger.warning("This seed includes the Expansion Pass, but the emulator has no %s. EX content is left alone, "
-                       "the goal no longer needs DLC story missions or EX challenges (goal challenges now %d), and the %d DLC checks are "
-                       "sent so nothing is stuck behind them.", " / ".join(missing), self.session.goal_challenges,
-                       len(left))
-        self.overlay.show("DLC not installed: DLC checks sent, goal adjusted")
-        self._tip("Expansion Pass not found: it's out of your goal and its checks were sent", 90)
+        logger.warning("The goal no longer needs DLC story missions or EX challenges (goal challenges now %d), and the %d "
+                       "DLC checks are sent so nothing is stuck behind them.", self.session.goal_challenges, len(left))
         if left:
             asyncio.create_task(self.check_locations(left), name="send DLC checks")
 
@@ -1044,7 +1075,8 @@ class AoCContext(CommonContext):
 
         source = next((str(message.get(k)) for k in ("mission", "weapon", "challenge", "quest", "korok", "name")
                        if k in message), "")
-        if location_id is None:
+        if location_id is None and source not in self._no_check_noted:  # (once each: thousands piled up per week)
+            self._no_check_noted.add(source)
             self._audit({"finding": "no_check", "kind": kind, "name": source})
         if location_id is not None:
             self.session.note_activity(time.time())
@@ -1257,6 +1289,13 @@ class AoCContext(CommonContext):
     def _show_goal_banner(self) -> None:
         """Goal progress at the top of the emulator window while on the world map (not during a mission)."""
         in_battle = self.live._battle_character()
+        hold = getattr(self, "_death_hold_source", None) if getattr(self, "_death_hold", False) else None
+        flow = self.live._flow() if in_battle else None
+        waiting = flow and flow[1] == FLOW_PAUSED and getattr(self, "_pending_kill", None)
+        if hold or waiting:  # (what to do next, whatever /goal_banner says)
+            self.overlay.set_banner(f"DeathLink from {hold}: your next hit defeats you (healing won't help)" if hold
+                                    else f"DeathLink from {self._pending_kill}: it lands when you unpause")
+            return
         if self._refresh_hint and not in_battle:  # a new seed's first visit: the map was drawn before the client's setup
             if self._refresh_until is None:
                 self._refresh_until = time.monotonic() + REFRESH_HINT_SECONDS
@@ -1355,7 +1394,7 @@ class AoCContext(CommonContext):
         class AoCManager(ui):
             base_title = "Archipelago Age of Calamity Client"
             if load_settings().get("research_probe"):  # its own tab, so research lines don't bury the game's
-                logging_pairs = [("Client", "Archipelago"), (PROBE_LOGGER, "Probe")]
+                logging_pairs = [("Client", "Archipelago"), (PROBE_LOGGER, "Game Research")]
 
         return AoCManager
 

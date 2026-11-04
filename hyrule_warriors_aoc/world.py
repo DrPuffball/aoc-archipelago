@@ -40,7 +40,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.79"
+WORLD_VERSION = "0.9.80"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.

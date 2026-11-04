@@ -1030,6 +1030,24 @@ class DlcFailsafeTests(WorldTestBase):
         session.challenges_done |= set(session.goal_challenge_pool)
         self.assertTrue(session.goal_complete)  # winnable without any DLC clear
 
+    def test_only_the_two_waves_count(self) -> None:
+        """Pulse of the Ancients and Guardian of Remembrance decide; the pre-order and purchase bonus DLCs never do."""
+        import json as _json
+        import os
+        import tempfile
+        from ..client.dlc import AOC_TITLE_ID, DLC_BASE, missing_waves
+        def write(folder, numbers):
+            os.makedirs(os.path.join(folder, "games", AOC_TITLE_ID), exist_ok=True)
+            with open(os.path.join(folder, "games", AOC_TITLE_ID, "dlc.json"), "w", encoding="utf-8") as f:
+                _json.dump([{"dlc_nca_list": [{"title_id": DLC_BASE + n, "is_enabled": True}]} for n in numbers], f)
+        with tempfile.TemporaryDirectory() as d:
+            write(d, (3, 4))  # no bonus DLCs: complete
+            self.assertEqual(missing_waves([d]), [])
+            write(d, (1, 2, 3, 4))  # with them: the same
+            self.assertEqual(missing_waves([d]), [])
+            write(d, (1, 2))  # bonus DLCs alone don't count
+            self.assertEqual(missing_waves([d]), ["Pulse of the Ancients", "Guardian of Remembrance"])
+
     def test_missing_waves_reads_ryujinx_list(self) -> None:
         import os
         import tempfile

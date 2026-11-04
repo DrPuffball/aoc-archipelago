@@ -96,7 +96,7 @@ save back. It never replaces a save while the game runs, nor a save with progres
 (/starter_save does that on purpose, keeping a copy).
 
 Client commands (optional): /todo (goal progress, what to play), /inventory, /check_hook, /deliver, /saves, /sync_saves, /ryujinx_folder,
-/starter_save, /goal_banner, /probe. Full details: SETUP_GUIDE.md.
+/starter_save, /goal_banner, /research. Full details: SETUP_GUIDE.md.
 
 HOW THE RANDOMIZER WORKS
 ------------------------
@@ -142,9 +142,9 @@ to the map once on a new seed, /todo for what the goal needs).
 
 Open an issue: https://github.com/DrPuffball/aoc-archipelago/issues with: what happened and what you expected, your YAML, the client log (Archipelago's
 logs folder, newest Launcher_*.txt).
-Testers can also type /probe on in the client: it then records which of its changes the game kept
+Testers can also type /research on in the client: it then records which of its changes the game kept
 or undid, quest rewards, and the client's last actions if the game crashes, in
-%USERPROFILE%\AoC_Archipelago\probe\findings.jsonl; attach that file too.
+%USERPROFILE%\AoC_Archipelago\research\findings.jsonl; attach that file too.
 
 SOURCE
 ------

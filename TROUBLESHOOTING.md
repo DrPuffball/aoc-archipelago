@@ -38,8 +38,9 @@ set, only clears on that difficulty or harder count (a notice tells you when a c
 item. Challenges and quests open a few at a time as you complete things (the client shows "Now open: ...").
 
 **I don't have the Expansion Pass.**
-Set `include_dlc: false` in your YAML. If a seed includes the DLC anyway, the client notices the missing DLC, takes it
-out of the goal and sends its checks, so the seed stays winnable.
+Set `include_dlc: false` in your YAML. If a seed includes the DLC anyway, the client warns you
+when the game starts. Type `/no_dlc` to take it out of the goal and send its checks, so the seed stays winnable. If you
+do have the DLC, check it's installed and enabled for the game in your emulator, and ignore the warning.
 
 **An EX Alert won't hold a check / can't be opened early.**
 That's expected: the game gives each Alert its monster when it appears, which the client can't do yet. Alerts appear
@@ -60,5 +61,5 @@ replaces).
 ## Reporting a problem
 
 Open an issue on GitHub with what happened and what you expected, your YAML, and the client log (Archipelago `logs`
-folder, newest `Launcher_*.txt`). Testers can type `/probe on` in the client and attach
-`%USERPROFILE%\AoC_Archipelago\probe\findings.jsonl` too.
+folder, newest `Launcher_*.txt`). Testers can type `/research on` in the client and attach
+`%USERPROFILE%\AoC_Archipelago\research\findings.jsonl` too.

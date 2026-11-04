@@ -100,7 +100,7 @@ server.
 `/deliver` items waiting for the game · `/saves` which save belongs to which seed · `/sync_saves` copy your save to
 the other emulator now · `/ryujinx_folder` where the client looks for Ryujinx saves · `/starter_save` replace a save
 the client doesn't recognise (it is kept, not deleted) · `/goal_banner on|off` the goal progress banner on the map ·
-`/probe on|off` the research recorder for testers.
+`/research on|off` game research for testers: records what the game did with each change, on your PC only.
 
 ## Troubleshooting
 
