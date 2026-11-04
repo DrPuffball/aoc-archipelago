@@ -88,6 +88,8 @@ def _counter(offset: int, n: int) -> tuple[tuple[Write, ...], ...]:
     return tuple(((PROFILE, offset, i + 1),) for i in range(n))
 
 
+# Never force 0x651, 0x65B, 0x65C: they looked like rewards but 0x65B and 0x65C are set by unrelated hand-ins too, so they're
+# one-shot "tutorial seen" flags. Forcing 0x65B back to 0 replayed "Contributions to Hyrule" after every A press (live, 2026-11-04).
 # Order = item ids (append only).
 REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Inner Power", "store", ("Inner Power",), (((PROFILE, 0xC78, 1),),)),  # [guess] batch 1
@@ -119,7 +121,7 @@ REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Progressive Forging Discount", "store", ("Quarry Recruiting",), (((FLAGS, 0x5E0, 1),),)),
     RewardGroup("Progressive Blacksmith Vigor", "store", ("Off to the Hot Springs",), (((FLAGS, 0x63E, 1),),)),
     RewardGroup("Progressive Max Weapon Level", "store", ("A Monumental Undertaking",),
-                (((FLAGS, 0x63F, 1), (FLAGS, 0x651, 1)),)),
+                (((FLAGS, 0x63F, 1),),)),
     RewardGroup("Progressive Seal Removal", "store", ("Caring for the Statues", "Secret of the Rito Artisans"),
                 (((FLAGS, 0x1A04, 1),), ((FLAGS, 0x1A05, 1),))),
     RewardGroup("Progressive Rust Removal", "store",
@@ -152,7 +154,7 @@ REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Progressive Blacksmith Upgrade", "store",
                 ("Shiny New Tools", "Road to Rust Research", "Tales of the Molten Forge", "The Legendary Blacksmith"),
                 (((FLAGS, 0x5E0, 1),), ((FLAGS, 0x641, 1),), ((FLAGS, 0x63E, 1),),
-                 ((FLAGS, 0x63F, 1), (FLAGS, 0x651, 1), (FLAGS, 0x65C, 1)))),
+                 ((FLAGS, 0x63F, 1),))),
     # Sheikah Sensor (0.9.73: store). Needed: Researchers! turns it on (profile 0xC7B [read: its hand-in]); the type-30
     # quests set three research levels to the values in their quest-table row (+0x34..+0x36; Feed the Research 1/1/1
     # matches its hand-in) [read from the quest table]. Until 0.9.73 the client undid Sweeten the Research's levels
@@ -169,7 +171,7 @@ REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Progressive Cooking Lesson", "store",
                 ("Snowbound Cook", "Master Monster Roasts", "Expert Cooking Lesson", "The Master Chef"),
                 (((FLAGS, 0x643, 1),), ((FLAGS, 0x643, 2),), ((FLAGS, 0x643, 3), (PROFILE, 0x2D8, 1)),
-                 ((FLAGS, 0x65B, 1), (FLAGS, 0x70E, 3), (FLAGS, 0x713, 5)))),
+                 ((FLAGS, 0x70E, 3), (FLAGS, 0x713, 5)))),  # (0x65B, 0x65C, 0x651: see below)
     # Type 34 recipes (0.9.73: store). Each quest's row (+0x38) names its recipe; the recipe is known when
     # profile + RECIPE_BASE + that number is 1 [read from the quest table; matches all 19 recipes seen handed in].
     RewardGroup("Progressive Recipe", "store", tuple(RECIPES),

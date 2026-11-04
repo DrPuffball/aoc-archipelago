@@ -157,6 +157,9 @@ Unknown rewards, read from recorded hand-ins (materials were at max, so some rew
 - Terrako's Return: profile `+0xB37` 2 -> 3 (meaning unknown). Hot Meals in a Pot: FLAGS `0x1A07`, profile `+0x2C3`.
 - Never handed in yet: 29 EX reward quests, Ancient-Material Delivery, Seething Malice, Reigning Malice, Fiery Inspiration.
 
+### One-shot flags: never force them
+`[0x5A0]+0x65B` is the "Contributions to Hyrule" tutorial-seen flag [confirmed: forcing it to 0 replays the tutorial, and unrelated hand-ins set it]. `+0x65C` is also set by unrelated hand-ins, and `+0x651` sits beside them [guess: same kind]. The client leaves all three alone.
+
 ### Royal Ancient Lab (Expansion Pass) [confirmed live on Eden, 2026-11-04]
 - 35 nodes: state list `[0x550]+0x4AE2 + node`, mirror `[0x5A0]+0x3AA5 + node` (1 locked, 2 open, 3 done). Writing 2 opens a node.
 - The lab shows on the map once `[0x5A0]+0x1A0F` is 1 (Road to the Ancient Lab's clear sets it).
