@@ -157,6 +157,9 @@ Unknown rewards, read from recorded hand-ins (materials were at max, so some rew
 - Terrako's Return: profile `+0xB37` 2 -> 3 (meaning unknown). Hot Meals in a Pot: FLAGS `0x1A07`, profile `+0x2C3`.
 - Never handed in yet: 29 EX reward quests, Ancient-Material Delivery, Seething Malice, Reigning Malice, Fiery Inspiration.
 
+### The Battle of Hyrule Field and the rune flags
+Its script sets the rune flags (story flags 0x19-0x1C) itself before the last wave and waits for them: the three moblins spawn only then [confirmed 2026-11-07: forcing Cryonis/Magnesis/Stasis off soft-locked the mission; switching them on spawned the moblins at once]. The client doesn't touch runes during that mission.
+
 ### One-shot flags: never force them
 `[0x5A0]+0x65B` is the "Contributions to Hyrule" tutorial-seen flag [confirmed: forcing it to 0 replays the tutorial, and unrelated hand-ins set it]. `+0x65C` is also set by unrelated hand-ins, and `+0x651` sits beside them [guess: same kind]. The client leaves all three alone.
 
@@ -178,6 +181,8 @@ Unknown rewards, read from recorded hand-ins (materials were at max, so some rew
   Seal Boost, `+0xC89` baked apples; flags `[0x5A0]+0x1A03, 0x1A08..0x1A0B, 0x1A0D, 0x1A0E, 0x640`; `[0x570]+0xF555` relic counter 0-2.
   Weapon capacity is profile `+0x7A6`, the same byte the capacity quests use. `[0x578] + 0x25A0 = [0x588]`, so `[0x578]+0x31AF` is profile `+0xC0F`.
 - The Technology of Disassembly changes only its node state; Roll Out the Research and Sensor of the Heart showed no separate byte either [not seen].
+
+- Selected node: the panel keeps a pointer to its title (UTF-16 at pointer + 6) in a heap object that moves each boot. The client scans for pointers to node titles and keeps the one that changes to another node's title [pointer followed one hover live; the client's use of it not yet seen].
 
 ### Quest table in memory
 Rows of 80 bytes from `+0x10`, found 213168 bytes past the quest unlock table. Zeroing a row's reward fields (`+0x30..0x3F` research,

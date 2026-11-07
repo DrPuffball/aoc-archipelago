@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import collections
 import random
+import re
 import struct
 import sys
 import time
@@ -706,6 +707,58 @@ class LiveGame:
                         if self.g.read(base + offset, 2) != struct.pack("<H", bonus):
                             self._write(base + offset, struct.pack("<H", bonus))
         return [n.name for n in LAB_NODES if states[n.index] == 3 and n.name in check_nodes]
+
+    # The lab's selected node [found live 2026-11-04]: the panel keeps a pointer to its title, UTF-16 at pointer + 6, in a heap object
+    # that moves each boot. A scan lists every pointer to a node title; the one whose title changes to another node's is the panel's.
+
+    def _lab_title(self, holder: int) -> str | None:
+        from ..data_lab import LAB_BY_NAME
+        raw = self.g.read(holder, 8)
+        target = struct.unpack("<Q", raw)[0] if raw else 0
+        text = self.g.read(target + 6, 100) if target else None
+        if not text:
+            return None
+        title = text.decode("utf-16-le", "replace").split("\0")[0]
+        return title if title in LAB_BY_NAME else None
+
+    def lab_scan(self) -> None:
+        """Slow (about 2 s, run it off the client's main loop): list the pointers to node titles."""
+        from ..data_lab import LAB_NODES
+        holder = self.g.u64(QUEST_UNLOCKS[0])
+        table = self.g.u64(holder + QUEST_UNLOCKS[1]) if holder else None
+        if not table:
+            return
+        names = re.compile(b"|".join(re.escape(n.name.encode("utf-16-le") + b"\0\0") for n in LAB_NODES))
+        regions = [(a, self.g.read(a, 1 << 20)) for a in range(table - (1 << 30), table + (1 << 30), 1 << 20)]
+        regions = [(a, d) for a, d in regions if d]
+        heads = {a + m.start() - 6 for a, d in regions for m in names.finditer(d)}
+        if not heads:
+            return
+        pointers = re.compile(b"|".join(re.escape(struct.pack("<Q", h)) for h in heads))
+        found = {a + m.start() for a, d in regions for m in pointers.finditer(d) if (a + m.start()) % 8 == 0}
+        self._lab_candidates = {h: self._lab_title(h) for h in found}
+
+    def lab_needs_scan(self) -> bool:
+        return getattr(self, "_lab_holder", None) is None and not getattr(self, "_lab_candidates", None)
+
+    def lab_selected_node(self) -> str | None:
+        """The node the lab panel shows; None until the player has moved the cursor once (nothing to tell the pointers apart)."""
+        holder = getattr(self, "_lab_holder", None)
+        if holder is not None:
+            title = self._lab_title(holder)
+            if title:
+                return title
+            self._lab_holder = None
+        kept = {}
+        for address, old in getattr(self, "_lab_candidates", {}).items():
+            title = self._lab_title(address)
+            if title and old and title != old:
+                self._lab_holder, self._lab_candidates = address, {}
+                return title
+            if title:
+                kept[address] = title
+        self._lab_candidates = kept
+        return None
 
     def _quest_table(self) -> int | None:
         """The quest table in memory, recognised by the type bytes of known quests (research 36, royal gift 51)."""

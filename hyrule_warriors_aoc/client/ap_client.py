@@ -42,6 +42,7 @@ FIRST_MISSION_NOTE = ("Note: a new game always starts with The Battle of Hyrule 
                       "over from the world map; clearing it is still a check.")
 BEAST = {"Regulating the Reservoir": " (Vah Ruta)", "Surveying the Volcano": " (Vah Rudania)",
          "Revitalize Those in the Skies": " (Vah Medoh)", "Patrolling the Desert": " (Vah Naboris)"}  # [guess by name]
+LAB_SERVICE = 425  # map cursor id of the Royal Ancient Lab (kind 5)
 SELECTION_PAGE, SELECTION_SECONDS = 6, 4.0  # cursor panel: checks per page, seconds per page
 STARTER_NOTE = ("This seed skips the forced first mission, but the starter save isn't installed on this save. If this "
                 "is a New Game, close Age of Calamity in the emulator: the client installs the starter save (backup kept) "
@@ -279,6 +280,7 @@ class AoCContext(CommonContext):
         self._first_mission_noted = False
         self._quest_rows_ok = True
         self._lab_ok = self._quest_table_ok = True
+        self._lab_scan_at = 0.0
         self._selection: tuple[int, int] | None = None
         self._selection_pages: list[str] = []
         self._selection_page = 0
@@ -511,6 +513,10 @@ class AoCContext(CommonContext):
             if self.live.set_reward_bytes(self.session.reward_writes()):
                 probe_logger.info("Quest rewards set from received items.")
             await self._lab_tick()
+            if (self.live.map_selection() == (LAB_SERVICE, 5) and self.session.ids["lab"] and self._lab_ok
+                    and self.live.lab_needs_scan() and time.monotonic() >= self._lab_scan_at):
+                self._lab_scan_at = time.monotonic() + 15
+                await asyncio.to_thread(self.live.lab_scan)
             states = self.session.quest_states()
             if quests := self.live.set_quest_states(states):
                 probe_logger.info("Services (quest states) set from received items: %s", ", ".join(quests))
@@ -546,6 +552,11 @@ class AoCContext(CommonContext):
             if self.session.death_link:
                 await self._death_link_tick()
             runes = self.session.rune_flags()
+            # The Battle of Hyrule Field's script switches the runes on itself before its last wave (the three moblins) and
+            # waits for them: forcing them off there soft-locked the mission [confirmed live 2026-11-07: switching them on
+            # brought the moblins at once]. So the client leaves the runes alone during that mission.
+            if runes and self.live._battle_character() and (self.live.map_selection() or (0, 0))[:2] == (1, 2):
+                runes = {}
             if runes and (changed := self.live.set_runes(runes)):
                 probe_logger.info("Sheikah Slate: %s", ", ".join(f"{r} {'given' if runes[r] else 'held back'}" for r in changed))
             # The game's own unlock rules follow the multiworld: only missions the seed has opened can be started.
@@ -1342,6 +1353,13 @@ class AoCContext(CommonContext):
         mission is running."""
         sel = None if self.live._battle_character() else self.live.map_selection()
         now = time.monotonic()
+        lab_node = None
+        if sel == (LAB_SERVICE, 5) and self.session.ids["lab"] and self.session.include_dlc:
+            try:
+                lab_node = self.live.lab_selected_node()
+            except Exception as e:  # (the panel is a convenience: never in the way)
+                logger.debug("Lab cursor: %s", e)
+            sel = (LAB_SERVICE, 5, lab_node)
         if sel == self._selection:
             if len(self._selection_pages) > 1 and now >= self._selection_turn:  # next page of a long list
                 self._selection_page = (self._selection_page + 1) % len(self._selection_pages)
@@ -1350,7 +1368,9 @@ class AoCContext(CommonContext):
             return
         self._selection = sel
         self._selection_pages, self._selection_page, self._selection_turn = [], 0, now + SELECTION_SECONDS
-        found = self.session.selection_checks(*sel) if sel else None
+        found = self.session.selection_checks(*sel[:2]) if sel else None
+        if lab_node:
+            found = (lab_node, [self.session.ids["lab"][lab_node]] if lab_node in self.session.ids["lab"] else [])
         if not found:
             self.overlay.set_status(None)
             return
@@ -1368,7 +1388,9 @@ class AoCContext(CommonContext):
                     lines.append("? (not scouted)")
                     continue
                 item = self.item_names.lookup_in_slot(info.item, info.player)
-                lines.append(item if info.player == self.slot else f"{self.player_names.get(info.player, '?')}'s {item}")
+                line = item if info.player == self.slot else f"{self.player_names.get(info.player, '?')}'s {item}"
+                node = self.session.lab_node_of(i)
+                lines.append(f"{node}: {line}" if node and not lab_node else line)
             pages = [lines[k:k + SELECTION_PAGE] for k in range(0, len(lines), SELECTION_PAGE)]
             self._selection_pages = [f"{name}" + (f"  ({n + 1}/{len(pages)})" if len(pages) > 1 else "") + "\n"
                                      + "\n".join(page) for n, page in enumerate(pages)]

@@ -167,6 +167,14 @@ class TestLabChecks(WorldTestBase):
         for item in [*LAB_ITEMS, *LAB_WEAPON_ITEMS]:
             self.assertIn(item, pool)
 
+    def test_lab_lists_its_nodes_on_the_cursor_panel(self) -> None:
+        from ..data_save import QUEST_STATE_IDS
+        session = Session(json.loads(json.dumps(self.multiworld.worlds[self.player].fill_slot_data())))
+        name, ids = session.selection_checks(QUEST_STATE_IDS["EX Ancient Tech Lab"], 5)
+        self.assertEqual(name, "Royal Ancient Lab")
+        self.assertEqual(len(ids), len(session.ids["lab"]))
+        self.assertEqual(session.lab_node_of(ids[0]), "The Battle-Tested Guardian")
+
     def test_direct_rewards_replace_the_unlocks(self) -> None:
         from ..data_rewards import ROYAL_GIFTS
         world = self.multiworld.worlds[self.player]

@@ -584,11 +584,19 @@ class Session:
             name = next((n for n, recs in MISSION_RECORD_IDS.items() if sel_id in recs), None)
             ids = [i for kind_ in ("mission", "challenge") for n, i in self.ids[kind_].items() if n == name]
             ids += [i for n, i in self.ids["difficulty"].items() if n.rpartition(" (")[0] == name]
+        elif kind == 5 and sel_id == QUEST_STATE_IDS["EX Ancient Tech Lab"] and self.ids["lab"]:
+            # (The cursor stays on the lab while you're inside it: the selected node isn't known, so list them all.)
+            from ..data_lab import LAB_NODES
+            return "Royal Ancient Lab", [self.ids["lab"][n.name] for n in LAB_NODES if n.name in self.ids["lab"]]
         else:
             return None
         if name is None:
             return None
         return name, ids + sorted(self.bonus_ids(name))
+
+    def lab_node_of(self, location_id: int) -> str | None:
+        found = self._by_id.get(location_id)
+        return found[1] if found and found[0] == "lab" else None
 
     def quest_rows(self) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
         """side_unlocks random: the game's quest unlock rows follow the client (as the mission and challenge rows do),
