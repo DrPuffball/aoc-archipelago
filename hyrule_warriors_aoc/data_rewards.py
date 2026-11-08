@@ -89,6 +89,8 @@ def _counter(offset: int, n: int) -> tuple[tuple[Write, ...], ...]:
 
 
 # Never force 0x651, 0x65B, 0x65C: they looked like rewards but 0x65B and 0x65C are set by unrelated hand-ins too, so they're
+# one-shot "tutorial seen" flags. 0x70E/0x713 (also from The Master Chef's hand-in) were fought by the game all through a
+# 30-hour run, and one crash came in a mission right after the client wrote 0x70E (probe findings, 2026-11-07): left alone too.
 # one-shot "tutorial seen" flags. Forcing 0x65B back to 0 replayed "Contributions to Hyrule" after every A press (live, 2026-11-04).
 # Order = item ids (append only).
 REWARD_GROUPS: list[RewardGroup] = [
@@ -171,7 +173,7 @@ REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Progressive Cooking Lesson", "store",
                 ("Snowbound Cook", "Master Monster Roasts", "Expert Cooking Lesson", "The Master Chef"),
                 (((FLAGS, 0x643, 1),), ((FLAGS, 0x643, 2),), ((FLAGS, 0x643, 3), (PROFILE, 0x2D8, 1)),
-                 ((FLAGS, 0x70E, 3), (FLAGS, 0x713, 5)))),  # (0x65B, 0x65C, 0x651: see below)
+                 ())),  # The Master Chef: no known reward byte. 0x65B/0x70E/0x713 were all game-owned (see below).
     # Type 34 recipes (0.9.73: store). Each quest's row (+0x38) names its recipe; the recipe is known when
     # profile + RECIPE_BASE + that number is 1 [read from the quest table; matches all 19 recipes seen handed in].
     RewardGroup("Progressive Recipe", "store", tuple(RECIPES),

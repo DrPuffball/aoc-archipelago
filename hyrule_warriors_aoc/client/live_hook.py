@@ -977,6 +977,7 @@ class LiveGame:
         self._write(real, struct.pack("<f", 0.0))
         self._write(char + CHAR_HP, struct.pack("<f", 0.0))
         self._hold_clock = struct.unpack("<I", self.g.read(flow[0] + FLOW_CLOCK, 4))[0]
+        self._hold_reals = {char: real}
         return True
 
     def death_can_land(self) -> bool:
@@ -990,6 +991,12 @@ class LiveGame:
         attempt's clock went back (a restart from the pause menu)."""
         char = self._battle_character()
         real = self._unit_hp(char) if char else None
+        # (On Eden the real HP is found by matching the shown HP: an apple picked up with a full pouch heals both apart, so
+        # the match failed and the hold ended, healing the player: user, 2026-11-07. Keep each hero's address once found.)
+        reals = getattr(self, "_hold_reals", {})
+        real = real or reals.get(char)
+        if char and real:
+            reals[char] = real
         flow = self._flow()
         if not real or not flow or flow[1] in FLOW_OVER:  # (a pause menu keeps the hold)
             return False
