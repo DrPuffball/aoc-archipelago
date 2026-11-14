@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from BaseClasses import CollectionState, LocationProgressType
 from Fill import fill_restrictive
+from worlds.generic.Rules import add_item_rule
 
 from .data import LEVEL_BAND_GATES
 from .data_challenges import CHALLENGE_BY_NAME
@@ -235,8 +236,13 @@ def exclude_post_goal(world: AgeOfCalamityWorld) -> list[str]:
     slot = {mission_location(m): i for i, m in enumerate(world.mission_order)}
     post_goal.sort(key=lambda loc: -slot.get(loc.name, -1))
     excluded = []
+    own_only = bool(world.options.local_filler)
     for loc in post_goal[:filler]:
         loc.progress_type = LocationProgressType.EXCLUDED
+        if own_only:  # local_filler keeps our filler here, so other worlds' filler mustn't take these spots: the
+            # excluded fill draws from every world's filler, and one of ours was left with nowhere to go (fuzz
+            # 2026-11-14: "No more spots to place 1 items", a 3-player seed)
+            add_item_rule(loc, lambda item, p=player: item.player == p)
         excluded.append(loc.name)
     return excluded
 

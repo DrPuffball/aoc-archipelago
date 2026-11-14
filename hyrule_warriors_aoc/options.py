@@ -37,10 +37,13 @@ class GameMode(Choice):
     The shape of the run.
 
     Standard: story missions, challenges and quests, as the other options set them.
-    Story Only: every check is on story missions (the Expansion Pass story too, with include_dlc). Each story clear
-    opens one new random story mission. The goal is goal_story_missions clears; goal_challenges is ignored.
+    Story Only: every check is on story missions (the Expansion Pass story too, with include_dlc). With
+    mission_unlocks: story_order each story clear opens one new random story mission; with mission_unlocks: items
+    (the default) they open by their unlock items, as in Standard. The goal is goal_story_missions clears;
+    goal_challenges is ignored.
     Challenges Only: every check is on challenge missions. Story missions (except The Battle of Hyrule Field) and map
-    quests are hidden. A few challenges are open at the start and each clear opens 3-8 more. The goal is
+    quests are hidden. A few challenges are open at the start and each clear opens 3-8 more; with
+    challenge_unlock_order: items each challenge opens by its own unlock item instead (8 start unlocked). The goal is
     goal_challenges clears (0 = 50); the story options and final_mission_goal are ignored.
 
     Both special modes open every service (shops, stables, dye shop, Smithy, Sheikah Sensor) from the start and spread
@@ -399,6 +402,7 @@ class ChallengeUnlockOrder(Choice):
     Vanilla: challenges open as in the game, following challenge_logic.
     Items: each challenge opens when its own "Unlock: <challenge>" item arrives, like story missions with
     mission_unlocks: items (needs challenge_checks; else it plays as Randomized). Adds one item per challenge.
+    Works in game_mode challenges_only too (8 challenges start unlocked); story_only has no challenges.
     """
 
     display_name = "Challenge Unlock Order"

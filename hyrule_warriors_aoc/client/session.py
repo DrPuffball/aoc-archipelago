@@ -748,10 +748,10 @@ class Session:
             if name in self.dlc_story and self.story_chain:  # Story Only: the clear before it in the chain
                 unlocks[ids[0]] = () if self.dlc_story_open(name) else (ids[0],)
                 continue
-            if self.game_mode == 1:  # Story Only: no other challenge is part of the run (vanilla rules)
-                continue
             if name in self.dlc_story and self.unlock_items:  # a DLC story mission: open with its unlock item
-                unlocks[ids[0]] = () if name in self.mission_unlocks else (ids[0],)
+                unlocks[ids[0]] = () if name in self.mission_unlocks else (ids[0],)  # (Story Only too)
+                continue
+            if self.game_mode == 1:  # Story Only: no other challenge is part of the run (vanilla rules)
                 continue
             if name in self.dlc_story:  # story order: the game's own chain (story and DLC records), as in logic
                 unlocks[ids[0]] = tuple(r for r in struct.unpack_from("<5H", bytes.fromhex(vanilla)) if r)

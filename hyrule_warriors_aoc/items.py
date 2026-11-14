@@ -195,7 +195,7 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
     # Heroes, locked features and runes must always exist: without them content stays locked for good. Anything that
     # finds no check (small seeds) is given at the start of the run instead of being lost.
     slots = len(world.multiworld.get_unfilled_locations(world.player))
-    for mission in world.starting_unlocks:
+    for mission in [*world.starting_unlocks, *world.starting_challenge_unlocks]:  # (Challenges Only: challenges)
         world.push_precollected(create_item(world, unlock_item(mission)))
     wanted = []
     if options.mission_unlocks == MissionUnlocks.option_items:  # first, so they get checks before anything else
@@ -204,7 +204,8 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
                    and not (m == FINAL_MISSION and options.final_mission_goal)]  # opens by the goal's counts
         wanted += [unlock_item(m) for m in world.dlc_story]  # DLC story missions open by their own items too
     story_unlocks = {name for name in wanted if name.startswith(UNLOCK_PREFIX)}
-    wanted += [unlock_item(c) for c in world.challenge_item_unlocks]  # 0.9.87: challenge_unlock_order items
+    wanted += [unlock_item(c) for c in world.challenge_item_unlocks  # 0.9.87: challenge_unlock_order items
+               if c not in world.starting_challenge_unlocks]
     wanted += [character_item(c) for c in world.characters if c not in world.starting_characters]
     wanted += list(world.forced_items)  # weapons a lab node or royal gift stands for: their only source
     wanted += [f"Feature: {f}" for f in sorted(f for f in FEATURES if f in options.locked_features.value)

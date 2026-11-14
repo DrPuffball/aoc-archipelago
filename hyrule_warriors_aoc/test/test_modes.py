@@ -12,7 +12,7 @@ from ..data_challenges import DLC_STORY_MISSIONS
 
 class StoryOnlyTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
-    options = {"game_mode": "story_only"}
+    options = {"game_mode": "story_only", "mission_unlocks": "story_order"}
 
     def test_every_check_is_on_story_missions(self) -> None:
         w = self.world
@@ -101,7 +101,7 @@ class ModeNoRecipeItemsTests(WorldTestBase):
 class StoryOnlyNoDlcFailsafeTests(WorldTestBase):
     """Story Only with the DLC on a game without it: the chain skips the DLC story instead of stopping there."""
     game = "Hyrule Warriors Age of Calamity"
-    options = {"game_mode": "story_only"}
+    options = {"game_mode": "story_only", "mission_unlocks": "story_order"}
 
     def test_chain_skips_dlc_when_dropped(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
@@ -410,3 +410,75 @@ class ChallengeUnlockItemsNeedChecksTests(WorldTestBase):
 
     def test_falls_back_without_challenge_checks(self) -> None:
         self.assertEqual(self.world.challenge_item_unlocks, [])
+
+
+class StoryOnlyUnlockItemsTests(WorldTestBase):
+    """Story Only with mission_unlocks: items (user, 2026-11-14): no chain; story missions open by their unlock items."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"game_mode": "story_only", "mission_unlocks": "items", "include_dlc": True}
+
+    def test_unlock_items_logic_and_client(self) -> None:
+        from ..items import unlock_item
+        from ..data_save import MISSION_RECORD_IDS
+        w = self.world
+        self.assertEqual(w.story_chain, [])
+        self.assertEqual(len(w.mission_order), len(MISSIONS))
+        self.assertEqual(set(w.dlc_story), set(DLC_STORY_MISSIONS))
+        names = [loc.name for loc in self.multiworld.get_locations(self.player) if loc.address is not None]
+        self.assertFalse([n for n in names if n.startswith(("Quest: ", "Obtain: "))])
+        self.assertFalse([n for n in names if n.startswith("Challenge: ") and n[11:].partition(" (Bonus")[0] not in DLC_STORY_MISSIONS])
+        pool = {i.name for i in self.multiworld.get_items() if i.player == self.player}
+        locked = [m for m in w.mission_order[1:] if m not in w.starting_unlocks
+                  and not (m == "The Future of Hyrule" and w.options.final_mission_goal)]
+        self.assertTrue({unlock_item(m) for m in locked + list(DLC_STORY_MISSIONS)} <= pool)
+        self.assertEqual(w.challenge_item_unlocks, [])
+        session = Session(json.loads(json.dumps(w.fill_slot_data())))
+        session.cleared_missions.add(MISSIONS[0].name)
+        self.assertEqual(set(session.available_missions()) - set(w.starting_unlocks), set())
+        mission = next(m for m in locked if m not in ("Calamity Strikes",) and not w.party_needs.get(m)
+                       and not w.mission_party.get(m))
+        self.assertNotIn(mission, session.available_missions())
+        session.apply_received_item_names([unlock_item(mission)])
+        self.assertIn(mission, session.available_missions())
+        dlc = DLC_STORY_MISSIONS[0]
+        record = MISSION_RECORD_IDS[dlc][0]
+        if not session.waiting_for_heroes().get(dlc) and session.challenge_unlocks().get(record) is not None:
+            self.assertEqual(session.challenge_unlocks()[record], (record,))  # closed
+            session.apply_received_item_names([unlock_item(dlc)])
+            self.assertEqual(session.challenge_unlocks()[record], ())  # opened by its item
+
+
+class ChallengesOnlyUnlockItemsTests(WorldTestBase):
+    """Challenges Only with challenge_unlock_order: items (user, 2026-11-14): 8 start unlocked, the rest by items."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"game_mode": "challenges_only", "challenge_unlock_order": "items"}
+
+    def test_items_logic_and_client(self) -> None:
+        from ..items import unlock_item
+        from ..data_save import MISSION_RECORD_IDS
+        from ..world import CHALLENGES_ONLY_ITEM_START
+        w = self.world
+        self.assertEqual(set(w.challenge_item_unlocks), set(w.active_challenges))
+        self.assertEqual(w.challenge_open_at, {})
+        self.assertEqual(len(w.starting_challenge_unlocks), CHALLENGES_ONLY_ITEM_START)
+        start = {i.name for i in self.multiworld.precollected_items[self.player]}
+        self.assertTrue({unlock_item(c) for c in w.starting_challenge_unlocks} <= start)
+        pool = [i.name for i in self.multiworld.get_items() if i.player == self.player]
+        rest = [c for c in w.challenge_item_unlocks if c not in w.starting_challenge_unlocks]
+        self.assertTrue({unlock_item(c) for c in rest} <= set(pool))
+        self.assertFalse({unlock_item(c) for c in w.starting_challenge_unlocks} & set(pool))
+        from BaseClasses import CollectionState
+        state = CollectionState(self.multiworld)  # the start: precollected items only
+        for c in w.starting_challenge_unlocks:  # playable from the start
+            self.assertTrue(self.multiworld.get_location(f"Event: Challenge {c}", self.player).can_reach(state), c)
+        session = Session(json.loads(json.dumps(w.fill_slot_data())))
+        session.cleared_missions.add(MISSIONS[0].name)
+        session.apply_received_item_names([unlock_item(c) for c in w.starting_challenge_unlocks])
+        unlocks = session.challenge_unlocks()
+        for c in w.starting_challenge_unlocks:
+            if c in MISSION_RECORD_IDS:
+                self.assertEqual(unlocks[MISSION_RECORD_IDS[c][0]], (), c)
+        closed = next(c for c in rest if c in MISSION_RECORD_IDS)
+        record = MISSION_RECORD_IDS[closed][0]
+        if unlocks.get(record) is not None:
+            self.assertEqual(unlocks[record], (record,))

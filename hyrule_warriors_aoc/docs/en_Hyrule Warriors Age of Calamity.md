@@ -74,10 +74,12 @@ difficulty setting to at least that level whenever you are on the map.
 `game_mode` changes the shape of the run. Both alternatives open every service from the start and put every check
 on level clears, spread evenly (bonus checks sent with each clear); recipes are items.
 - **Story Only:** every check is on story missions (the Guardian of Remembrance missions too with the DLC). Each
-  clear opens one new random story mission. The goal is `goal_story_missions` clears.
+  clear opens one new random story mission; with `mission_unlocks: items` (the default) story missions open by
+  their unlock items instead, as in Standard. The goal is `goal_story_missions` clears.
 - **Challenges Only:** every check is on challenge missions; story missions (except the pre-cleared Battle of
-  Hyrule Field) and map quests don't appear. Each clear opens 3-8 more challenges. The goal is `goal_challenges`
-  clears (0 = 50).
+  Hyrule Field) and map quests don't appear. Each clear opens 3-8 more challenges; with
+  `challenge_unlock_order: items` each challenge opens by its own unlock item instead, and 8 start unlocked. The goal
+  is `goal_challenges` clears (0 = 50).
 
 ## Pacing and DeathLink
 

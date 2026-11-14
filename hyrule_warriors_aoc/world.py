@@ -41,7 +41,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.87"
+WORLD_VERSION = "0.9.88"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -50,6 +50,7 @@ RANDOM_SIDE_MIN_EACH = 3
 RANDOM_SIDE_STEP = (2, 4)
 CHALLENGES_ONLY_STEP = (3, 8)  # Challenges Only: each clear opens 3-8 more (user, 2026-11-02)
 CHALLENGES_ONLY_GOAL = 50  # Challenges Only with goal_challenges 0
+CHALLENGES_ONLY_ITEM_START = 8  # Challenges Only with challenge unlock items: challenges unlocked from the start
 COMPLETIONS = rules.COMPLETIONS  # state counter of completion events (kept by collect/remove)
 
 
@@ -263,7 +264,7 @@ class AgeOfCalamityWorld(World):
         self.slot_prerequisites = {m.name: m.prerequisites for m in MISSIONS}
         self.mission_order = assigned
         self.story_chain: list[str] = []
-        if self.game_mode == GameMode.option_story_only:
+        if self.game_mode == GameMode.option_story_only and not unlock_items:  # (with items: as Standard's story)
             self._plan_story_chain(pick)
         elif self.game_mode == GameMode.option_challenges_only:  # no story but the pre-cleared first mission
             first = MISSIONS[0].name
@@ -324,7 +325,9 @@ class AgeOfCalamityWorld(World):
             return self.random.sample(names, keep) if keep < len(names) else list(names)
 
         if self.game_mode == GameMode.option_story_only:
-            self.active_challenges = [c for c in self.story_chain if c in DLC_STORY_MISSIONS]  # the DLC story only
+            # the DLC story only (with mission unlock items there is no chain: every DLC story mission, with include_dlc)
+            self.active_challenges = [c for c in (self.story_chain or (DLC_STORY_MISSIONS if dlc else ()))
+                                      if c in DLC_STORY_MISSIONS]
         elif side:
             # EX Alerts stay vanilla (playable, replayable, never checks): the game assigns each one a sighting (monster)
             # when it appears, which the client can't set yet; one opened by hand crashed in its loading screen (user,
@@ -508,10 +511,14 @@ class AgeOfCalamityWorld(World):
                                  or self.game_mode == GameMode.option_challenges_only)
         # 0.9.87: challenge_unlock_order items (user: default off): every challenge opens with its own unlock item;
         # without challenge checks there is nowhere to put them, so it plays as Randomized.
-        wants_items = options.challenge_unlock_order == ChallengeUnlockOrder.option_items and not self.game_mode
+        # Challenges Only can use them too (user, 2026-11-14): then a few start unlocked instead of the random chain.
+        wants_items = (options.challenge_unlock_order == ChallengeUnlockOrder.option_items
+                       and self.game_mode != GameMode.option_story_only)
         if wants_items and "Challenges" not in side:
             logging.warning("%s: challenge_unlock_order items needs challenge checks: using randomized.", self.player_name)
             self.challenge_random, wants_items = shuffled, False
+        if wants_items:
+            self.challenge_random = False
         self.challenge_item_unlocks = ([c for c in self.active_challenges if c not in self.dlc_story] if wants_items else [])
         self.quest_random = shuffled and options.quest_unlock_order == QuestUnlockOrder.option_randomized
         self.side_random = self.challenge_random or self.quest_random
@@ -529,6 +536,22 @@ class AgeOfCalamityWorld(World):
         self.checked_weapons = [w for w in self.checked_weapons if w not in self.post_goal_weapons]
         if ut:
             self.checked_weapons = [w for w in self.active_weapons if w in ut["weapon_ids"]]
+        self.starting_challenge_unlocks = self._pick_starting_challenges()
+        if ut:
+            self.starting_challenge_unlocks = list(ut.get("starting_challenge_unlocks", self.starting_challenge_unlocks))
+
+    def _pick_starting_challenges(self) -> list[str]:
+        """Challenges Only with challenge unlock items: there is no story to find the first items in, so a few
+        challenges start unlocked. Only ones playable at once: nothing needed but their unlock item and your heroes."""
+        if self.game_mode != GameMode.option_challenges_only or not self.challenge_item_unlocks:
+            return []
+        start = {items.character_item(c) for c in self.starting_characters}
+        ready = [c for c in self.challenge_item_unlocks if not CHALLENGE_BY_NAME[c].is_ex  # (works without the DLC)
+                 and all(r == items.unlock_item(c) or r in start for r in rules.challenge_requirements(self, c))]
+        if len(ready) < CHALLENGES_ONLY_ITEM_START:
+            raise OptionError(f"{self.player_name}: too few challenges are playable at the start for challenge "
+                              f"unlock items ({len(ready)}).")
+        return self.random.sample(ready, CHALLENGES_ONLY_ITEM_START)
 
     def _apply_game_mode(self) -> None:
         """Story Only / Challenges Only (user, 2026-11-02) override the options they replace."""
@@ -540,7 +563,7 @@ class AgeOfCalamityWorld(World):
             o.locked_features.value = set()
         if self.game_mode == GameMode.option_story_only:
             o.side_content.value = set()  # every check on story missions (bonus checks), DLC story included
-            o.mission_unlocks.value = MissionUnlocks.option_story_order  # each clear opens the next (story_chain)
+            # (mission_unlocks story_order: each clear opens the next, story_chain; items: as Standard, user 2026-11-14)
             o.goal.value = Goal.option_story
             o.goal_challenges.value = 0
             o.goal_quests.value = 0
@@ -606,10 +629,10 @@ class AgeOfCalamityWorld(World):
         # post-story content joins the random openings unless post_story_unlock is 20 (vanilla: after the whole story)
         vanilla_post = self.options.post_story_unlock.value >= 20
         only = self.game_mode == GameMode.option_challenges_only  # every challenge joins (no story to wait for)
-        challenges = [c for c in self.active_challenges if only or not (self.boss_goal and c in BOSS_CHALLENGES)
+        challenges = [c for c in self.active_challenges if (only or not (self.boss_goal and c in BOSS_CHALLENGES)
                       and not (vanilla_post and _post_story_challenge(c) and not only) and c not in self.challenge_quests
-                      and c not in self.dlc_story  # story missions: unlock items or the game's chain, not side counts
-                      and self.challenge_random]
+                      and c not in self.dlc_story)  # story missions: unlock items or the game's chain, not side counts
+                      and self.challenge_random]  # (Challenges Only with challenge unlock items: none)
         # Expansion Pass quests carry a conservative after-the-story gate in our data, but all of them can be handed in
         # whenever they're open (77 forced open, 2026-11-02): they join the random order (user: DLC pops up anytime)
         quests = [q for q in self.active_quests if q not in self.open_quests and not q.startswith("The Hope of ")
@@ -862,6 +885,7 @@ class AgeOfCalamityWorld(World):
             "pace": pace,
             "starting_characters": list(self.starting_characters),
             "starting_unlocks": list(self.starting_unlocks),
+            "starting_challenge_unlocks": list(self.starting_challenge_unlocks),
             # every option of this world, so Universal Tracker can rebuild the seed without the YAML
             "ut_options": self.options.as_dict(*self._own_option_names()),
             "mission_ids": {m: ids[locations.mission_location(m)] for m in self.mission_order},
