@@ -17,6 +17,7 @@ from .data_lab import FUTURE_OF_HYRULE, LAB_BY_NAME, LAB_MISSION_CONDITION, LAB_
 from .locations import (challenge_bonus_location, challenge_location, lab_location, mission_location, quest_location,
                         weapon_location)
 from .options import ChallengeLogic, GameMode, Goal, MissionUnlocks, SheikahRunes, StoryParty, WeaponCheckLogic
+HOPE_OF_ALL_HYRULE = "The Hope of All Hyrule"
 from .regions import POST_STORY_EVENT, STORY_EVENT, VICTORY_EVENT, challenge_event, cleared_event, quest_event
 
 if TYPE_CHECKING:
@@ -110,6 +111,8 @@ def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
         required = [cleared_event(before) if before in MISSION_BY_NAME else challenge_event(before)]
     elif name in world.dlc_story:  # story order: the game's own chain (after Calamity Strikes ...), not post-story
         required = [cleared_event(n) if n in MISSION_BY_NAME else challenge_event(n) for n in vanilla_prerequisites(name)]
+    elif name in world.challenge_item_unlocks:
+        required = [unlock_item(name)]  # challenge_unlock_order items: opens with its own item
     elif name in world.challenge_open_at:
         required = []  # side_unlocks random: opens by completion count (side_open_count), not by a story gate
     else:
@@ -125,7 +128,7 @@ def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
     required += [quest_event(q) for q in world.challenge_quests.get(name, ())]  # the game's own quest gate
     if world.fairy_locked and name in FEATURE_CHALLENGES["Fairy Fountains"]:
         required.append("Feature: Fairy Fountains")
-    if world.options.story_party == StoryParty.option_free:  # the client puts your heroes in their forced slots
+    if world.options.story_party != StoryParty.option_vanilla:  # free: your heroes go in; borrowed: lent
         return required  # (0.9.74, user: challenges open whenever the randomizer says, like the story)
     return required + [character_item(c) for c in challenge.required_characters]
 
@@ -180,6 +183,14 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
         goal_all += [character_item(c) for c in world.characters]
     if world.boss_goal:
         goal_all += [challenge_event(c) for c in BOSS_CHALLENGES]
+    hope_all = []
+    if world.options.goal_hope_of_all_hyrule:  # 100% map: every hero, challenge and quest of the seed, after the story
+        hope_all = [POST_STORY_EVENT, *(character_item(c) for c in world.characters),
+                    *(challenge_event(c) for c in world.active_challenges if c not in world.dlc_story),
+                    *(quest_event(q) for q in world.active_quests if q != HOPE_OF_ALL_HYRULE)]
+    # (Some of that content opens only after The Future of Hyrule, so with final_mission_goal the 100% map comes after
+    # its clear, not before: fuzz 2026-11-14, 10 of 32 Hope seeds were unbeatable the other way.)
+    hope = _rule(player, hope_all)
     goal_count = world.goal_side_required
     extras = _rule(player, goal_all, count_of=world.side_counted if goal_count else (), count=goal_count)
     challenge_events = [challenge_event(c) for c in world.goal_challenge_pool]
@@ -196,10 +207,10 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
                  and sum(state.has(e, player) for e in challenge_events) >= challenges_needed
                  and sum(state.has(e, player) for e in quest_events) >= quests_needed)
         set_rule(world.get_entrance("Finish All Main Missions"),
-                 lambda state: state.has(cleared_event(FINAL_MISSION), player))
+                 lambda state: state.has(cleared_event(FINAL_MISSION), player) and hope(state))
     else:
         set_rule(world.get_entrance("Finish All Main Missions"),
-                 lambda state: extras(state) and sum(state.has(e, player) for e in story_events) >= story_needed
+                 lambda state: extras(state) and hope(state) and sum(state.has(e, player) for e in story_events) >= story_needed
                  and sum(state.has(e, player) for e in challenge_events) >= challenges_needed
                  and sum(state.has(e, player) for e in quest_events) >= quests_needed)
     world.multiworld.completion_condition[player] = lambda state: state.has(VICTORY_EVENT, player)

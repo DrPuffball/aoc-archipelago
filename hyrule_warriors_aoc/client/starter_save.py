@@ -69,9 +69,13 @@ def template() -> bytes:
     return data
 
 
-def prepare(starting_heroes: list[str], open_missions: list[str]) -> bytes:
+def prepare(starting_heroes: list[str], open_missions: list[str], quest_states: dict[str, int] | None = None,
+            challenge_unlocks: dict[int, tuple[int, ...]] | None = None) -> bytes:
     """The template for one seed: its starting heroes unlocked, its first mission(s) open on the map (the live client
-    keeps all of this in step once the game runs)."""
+    keeps all of this in step once the game runs). 0.9.87: also the quests and challenges the seed opens at the start
+    (the client's quest_states and challenge_unlocks), so the world map is right on its first draw instead of after a
+    menu round trip: quest states at save 0xB34 + id (1 not available, 2 available), challenge records in both
+    mission state lists like the story."""
     data = bytearray(template())
     for hero in starting_heroes:
         if hero in L.HERO_SLOTS:
@@ -81,6 +85,21 @@ def prepare(starting_heroes: list[str], open_missions: list[str]) -> bytes:
         for offset, _ in STATE_LISTS:
             if data[offset + record] != 3:  # never un-clear Hyrule Field
                 data[offset + record] = 2
+    cleared = {r for r in range(L.MISSION_RECORD_COUNT) if data[STATE_LISTS[0][0] + r] == 3}
+    for record, needs in (challenge_unlocks or {}).items():
+        if record in needs or not all(r in cleared for r in needs):
+            continue  # closed for now (a row that needs its own clear is how the client keeps one shut)
+        for offset, _ in STATE_LISTS:
+            if data[offset + record] != 3:
+                data[offset + record] = 2
+    for name, want in (quest_states or {}).items():
+        i = L.QUEST_STATE_IDS.get(name)
+        if i is None or want == L.QUEST_DONE:  # (done quests need their effects: the live client does those)
+            continue
+        now = data[L.QUEST_STATE_SAVE + i]
+        if (want == 2 and now >= 2) or (want == -1 and now != 2):
+            continue  # same rules as live_hook.set_quest_states: never lower an open/done quest by "2"
+        data[L.QUEST_STATE_SAVE + i] = abs(want)
     return bytes(data)
 
 

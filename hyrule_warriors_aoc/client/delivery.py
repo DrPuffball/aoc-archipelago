@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Protocol
 
 from ..data import MATERIAL_BUNDLES, WEAPON_BUNDLES, WEAPON_BY_NAME, WEAPONS
-from ..data_rewards import RESEARCH_AMOUNT, RESEARCH_BY_ITEM, RESEARCH_REWARDS
+from ..data_rewards import MASTER_CHEF_ITEM, MASTER_CHEF_RUPEES, RESEARCH_AMOUNT, RESEARCH_BY_ITEM, RESEARCH_REWARDS
 from ..data_save import WEAPON_KINDS
 from ..items import WEAPON_PREFIX
 from .savefile import SavePatch
@@ -142,7 +142,7 @@ class Delivery:
     # --- consumables ------------------------------------------------------------------------
 
     def pending(self, items: list[str]) -> list[str]:
-        return [n for n in items[self.state["applied"]:] if n in CONSUMABLES or n in RESEARCH_BY_ITEM]
+        return [n for n in items[self.state["applied"]:] if n in CONSUMABLES or n in RESEARCH_BY_ITEM or n == MASTER_CHEF_ITEM]
 
     def apply(self, items: list[str], heroes: set[str], target: Target) -> list[str]:
         """Apply every consumable received since last time. Returns what was done."""
@@ -157,6 +157,8 @@ class Delivery:
             if name in RESEARCH_BY_ITEM:
                 material, outfit = RESEARCH_REWARDS[RESEARCH_BY_ITEM[name]]
                 done.append(f"{name}: {target.give_research(material, RESEARCH_AMOUNT, outfit)}")
+            elif name == MASTER_CHEF_ITEM:  # 0.9.87: The Master Chef's 1000 rupees (its trade pays nothing)
+                done.append(f"{name}: {target.add_rupees(MASTER_CHEF_RUPEES)}")
             elif name == "Rupee Pouch":
                 done.append(f"Rupee Pouch: {target.add_rupees(RUPEE_POUCH)}")
             elif name in MATERIAL_BUNDLES:

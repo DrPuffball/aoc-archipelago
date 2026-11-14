@@ -52,6 +52,7 @@ UNIT_RECORDS, UNIT_SIZE, UNIT_HP = 0x176E70, 0x6C, 0x44
 # HP 0 alone never KOs (the game checks it only when a hit lands). The mission flow state is a u32 at
 # [module + 0x2780A80] + 0xB0 (low byte: 0 = playing, 0x60 = pause menu [seen on Eden], 4 = defeated, 12 = defeat menu).
 FLOW_STATE, FLOW_REQUEST = 0xB0, 0xB8
+OPTIONS, DIFFICULTY_SETTING, OPTIONS_COPY = 0x5B0, 0x123, 0xE0  # game options block: difficulty (1 Easy .. 4 Very Hard)
 FLOW_PLAYING = 0
 FLOW_OVER = (4, 12)
 FLOW_CLOCK = 0x128  # counts up during an attempt (frames at half rate); starts over on a restart [seen on Eden]
@@ -654,11 +655,13 @@ class LiveGame:
                 at = data.find(marker, at + 1)
         return None
 
-    def sync_lab(self, values: dict[tuple[int, int], int], check_nodes: set[str]) -> list[str]:
+    def sync_lab(self, values: dict[tuple[int, int], int], check_nodes: set[str],
+                 held: dict[int, bool] | None = None, bought: set[str] = frozenset()) -> list[str]:
         """Keep the lab as the seed wants it: every node open, table rewards the items give removed,
-        stored rewards following the items. Returns the check nodes the game shows done."""
+        stored rewards following the items. held (0.9.87): node index -> item received, for nodes whose reward is the
+        node being done (bought = check nodes already sent). Returns the check nodes the game shows done."""
         from ..data_lab import (ATTACK_PER_NODE, LAB_ATTACK, LAB_ATTACK_FIELD, WEAPON_LAB_ATTACK, LAB_CAPACITY_FIELD, LAB_MIRROR, LAB_NODE_COUNT, LAB_NODES, LAB_ROW_ANCHOR,
-                                LAB_ROW_SIZE, LAB_WEAPON_FIELD)
+                                LAB_ROW_SIZE, LAB_WEAPON_FIELD, lab_state_target)
         from ..data_rewards import BLOCK_SAVED_COPY, FLAGS, PROFILE
         # The lab shows on the map only with this flag, set by Road to the Ancient Lab's clear [confirmed live 2026-11-04].
         flags = self._ptr(FLAGS)
@@ -670,10 +673,13 @@ class LiveGame:
         states = self.g.read(states_at, LAB_NODE_COUNT)
         if states is None or not all(1 <= s <= 3 for s in states):
             raise HookError("lab states not recognised")
+        held = held or {}
+        done_now = [n.name for n in LAB_NODES if states[n.index] == 3 and n.name in check_nodes]
         for i, state in enumerate(states):
-            if state == 1:
-                self._write(states_at + i, b"\2")
-                self._write(mirror_at + i, b"\2")
+            want = lab_state_target(i, state, held, bought)
+            if want != state:
+                self._write(states_at + i, bytes([want]))
+                self._write(mirror_at + i, bytes([want]))
         row0 = self._lab_row0()
         if row0 is None:
             raise HookError("lab table not found")
@@ -706,7 +712,7 @@ class LiveGame:
                     for base in self._weapon_pools():
                         if self.g.read(base + offset, 2) != struct.pack("<H", bonus):
                             self._write(base + offset, struct.pack("<H", bonus))
-        return [n.name for n in LAB_NODES if states[n.index] == 3 and n.name in check_nodes]
+        return done_now
 
     # The lab's selected node [found live 2026-11-04]: the panel keeps a pointer to its title, UTF-16 at pointer + 6, in a heap object
     # that moves each boot. A scan lists every pointer to a node title; the one whose title changes to another node's is the panel's.
@@ -785,14 +791,17 @@ class LiveGame:
 
     def empty_quest_rows(self, quests: list[str]) -> list[str]:
         """Take the rewards out of these quests' table rows, so buying one only sends its check: the weapon (+0x1C, type
-        51) or the material and outfit (+0x30..+0x3F, type 36). Rows the game put back are emptied again."""
+        51), the material and outfit (+0x30..+0x3F, type 36) or The Master Chef's rupees (+0x0C u32, type 42). Rows the
+        game put back are emptied again."""
         table = self._quest_table()
         if table is None:
             raise HookError("quest table not found")
         changed = []
         for name in quests:
             row = table + 0x10 + S.QUEST_STATE_IDS[name] * QUEST_ROW
-            for field, size in ((0x1C, 2), (0x30, 0x10)) if self.g.read(row + QUEST_ROW_TYPE, 1) == b"\x33" else ((0x30, 0x10),):
+            kind = self.g.read(row + QUEST_ROW_TYPE, 1)
+            fields = {b"\x33": ((0x1C, 2), (0x30, 0x10)), b"\x2a": ((0x0C, 4),)}.get(kind, ((0x30, 0x10),))
+            for field, size in fields:
                 if self.g.read(row + field, size) != bytes(size):
                     self._write(row + field, bytes(size))
                     if name not in changed:
@@ -1069,6 +1078,44 @@ class LiveGame:
                     if record not in changed:
                         changed.append(record)
         return changed
+
+    def raise_difficulty(self, minimum: int) -> int | None:
+        """difficulty_lock (0.9.87): the game's difficulty setting is [P+0x5B0]+0x123, four copies 0xE0 apart, values
+        1 Easy, 2 Normal, 3 Hard, 4 Very Hard (5 Apocalyptic, guessed) [confirmed 2026-11-13 on Eden: the Options menu
+        shows a written value]. Raises it to `minimum` when lower; returns the old value if it changed, else None."""
+        base = self._ptr(OPTIONS) + DIFFICULTY_SETTING
+        values = [self.g.read(base + k * OPTIONS_COPY, 1) for k in range(4)]
+        if any(v is None or not 1 <= v[0] <= 5 for v in values):
+            raise HookError("difficulty setting not recognised")
+        old = values[0][0]
+        if all(v[0] >= minimum for v in values):
+            return None
+        for k in range(4):
+            self._write(base + k * OPTIONS_COPY, bytes([max(values[k][0], minimum)]))
+        return old
+
+    def hold_rune_mission(self, hold: bool) -> bool:
+        """Rune lock (0.9.87): at mission load the game gives Magnesis and Stasis when their story flag is set OR Road to
+        the Ancient Lab's PROFILE mission state is 3 [confirmed 2026-11-09, Eden: profile lists only at 2 removed them;
+        clear times and map lists don't matter]. hold=True keeps a cleared Road's profile state (current and saved copy)
+        at 2 so the flags decide; hold=False puts 3 back once Road has a clear time. Clear times, the map lists and the
+        missions Road unlocks are untouched (the game's unlock checks and the client both read clears). Side effects
+        while held [seen]: Road shows no COMPLETE in the Chapters list and the load-screen clear count is one lower.
+        Returns True when something was written."""
+        lists, blobs = self._state_lists()
+        record = S.MISSION_RECORD_IDS["Road to the Ancient Lab"][0]
+        if hold:
+            want, only = 2, 3
+        elif record in self.cleared_records():
+            want, only = 3, 2
+        else:
+            return False
+        wrote = False
+        for (addr, _), blob in zip(lists[:len(MISSION_STATES_PROFILE)], blobs):
+            if blob[record] == only:
+                self._write(addr + record, bytes([want]))
+                wrote = True
+        return wrote
 
     def set_mission_locks(self, open_missions: set[str] | None) -> list[int]:
         """Make the game's own unlock rules follow the multiworld: every story mission in open_missions has no

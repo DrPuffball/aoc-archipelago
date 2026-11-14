@@ -12,6 +12,7 @@ Hyrule Warriors Age of Calamity:
   goal_challenges: 25                  # challenge clears also needed (0-168)
   goal_quests: 0                       # quests also needed (0 = none)
   goal_all_heroes: false               # the goal also needs every hero
+  goal_hope_of_all_hyrule: false       # the goal also needs The Hope of All Hyrule (100% map)
   goal_difficulty: any                 # any | easy | normal | hard | very_hard | apocalyptic (harder counts for easier)
 
   # --- What holds checks ---
@@ -23,18 +24,18 @@ Hyrule Warriors Age of Calamity:
   region_hope_checks: false            # "The Hope of <region>" (100% of a region)
   difficulty_checks: off               # off | normal | hard | very_hard: one more check per mission for each harder difficulty
   difficulty_checks_challenges: true   # challenges get those per-difficulty checks too
-  difficulty_lock: off                 # off | normal | hard | very_hard: clears on easier difficulties count for nothing
+  difficulty_lock: off                 # off | normal | hard | very_hard: easier clears count for nothing; the game's setting is raised
 
   # --- Story ---
   mission_unlocks: items               # story_order | items (each story mission opens with its "Unlock:" item)
   starting_mission_unlocks: 2          # with items: early-mission unlocks you start with (1-5)
   first_mission: random_any            # random_any | random_early (chapters 1-2) | vanilla
   mission_order: shuffle_all           # vanilla | shuffle_within_chapter | shuffle_all (ignored with mission_unlocks: items)
-  story_party: free                    # free (any party) | vanilla (story-forced heroes must be unlocked)
+  story_party: free                    # free (your heroes) | vanilla (forced heroes must be yours) | borrowed (forced heroes lent per mission)
   side_missions_per_unlock: 0          # >0: each later story slot needs that many side missions per position
 
   # --- Challenges and quests ---
-  challenge_unlock_order: randomized   # randomized: a few open, 2-4 more per completion | vanilla
+  challenge_unlock_order: randomized   # randomized: a few open, 2-4 more per completion | vanilla | items (one unlock item each)
   quest_unlock_order: randomized       # randomized | vanilla (the game's own quest order)
   post_story_unlock: 10                # post-story challenges/quests mixed in before the goal (20 = vanilla, no checks there)
   challenge_logic: after_story         # with challenge_unlock_order: vanilla: after_story | by_level
@@ -57,7 +58,6 @@ Hyrule Warriors Age of Calamity:
   # --- Locked features ---
   weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
   locked_features: [Terrako Guardian, Fairy Fountains]  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian
-  sheikah_runes: shuffled              # vanilla | shuffled | start_with_all
 
   # --- Upgrade items ---
   heart_containers: 1                  # per hero (0-5)

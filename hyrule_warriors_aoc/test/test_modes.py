@@ -140,6 +140,66 @@ class GoalQuestsTests(WorldTestBase):
         self.assertTrue(session.goal_complete)
 
 
+class GoalHopeTests(WorldTestBase):
+    """goal_hope_of_all_hyrule (0.9.87): the goal also waits for The Hope of All Hyrule, in logic and the client."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"goal_hope_of_all_hyrule": True, "goal_story_missions": 2, "goal_challenges": 0,
+               "final_mission_goal": False, "challenge_checks": True, "quest_checks": True}
+
+    def test_goal_waits_for_the_hope(self) -> None:
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertTrue(session.goal_hope)
+        self.assertIn("100% map to do", session.goal_banner_text())
+        session.cleared_missions |= set(session.story_names)
+        self.assertFalse(session.goal_complete)
+        session.game_done.add("The Hope of All Hyrule")
+        self.assertTrue(session.goal_complete)
+
+    def test_logic_needs_every_hero(self) -> None:
+        from BaseClasses import CollectionState
+        items = self.multiworld.itempool + [loc.item for loc in self.multiworld.get_locations() if loc.item]
+        heroes = [i for i in items if i.player == self.player and i.name.startswith("Character: ")]
+        state = CollectionState(self.multiworld)
+        for item in items:
+            if item.player == self.player and item not in heroes and item.advancement and item.code is not None:
+                state.collect(item, True)
+        state.sweep_for_advancements()
+        self.assertFalse(self.multiworld.can_beat_game(state))
+        for item in heroes:
+            state.collect(item, True)
+        state.sweep_for_advancements()
+        self.assertTrue(self.multiworld.can_beat_game(state))
+
+
+class GoalHopeFinalMissionTests(WorldTestBase):
+    """Hope with final_mission_goal: some of the 100% map opens only after The Future of Hyrule, so the final mission
+    opens without it and the goal is both (fuzz 2026-11-14: the other way round was unbeatable)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"goal_hope_of_all_hyrule": True, "final_mission_goal": True, "goal_story_missions": 20, "goal_challenges": 0,
+               "challenge_checks": True, "quest_checks": True, "post_story_unlock": 20}
+
+    def test_final_mission_first_then_hope(self) -> None:
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertTrue(session.final_goal and session.goal_hope)
+        others = [m for m in session.story_names if m != session.final_mission]
+        session.cleared_missions |= set(others)
+        self.assertTrue(session._goal_counts_met(exclude_final=True))  # The Future of Hyrule may open
+        session.cleared_missions.add(session.final_mission)
+        self.assertFalse(session.goal_complete)
+        session.game_done.add("The Hope of All Hyrule")
+        self.assertTrue(session.goal_complete)
+
+
+class GoalHopeChallengesOnlyTests(WorldTestBase):
+    """Challenges Only keeps every map quest closed: the Hope goal is turned off there."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"goal_hope_of_all_hyrule": True, "game_mode": "challenges_only"}
+
+    def test_turned_off(self) -> None:
+        self.assertFalse(self.world.options.goal_hope_of_all_hyrule)
+        self.assertFalse(self.world.fill_slot_data()["goal_hope_of_all_hyrule"])
+
+
 class TestRelicNodesAndTheGoal(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
     options = {"include_dlc": True, "lab_checks": True, "final_mission_goal": True}
@@ -167,6 +227,24 @@ class TestLabChecks(WorldTestBase):
         for item in [*LAB_ITEMS, *LAB_WEAPON_ITEMS]:
             self.assertIn(item, pool)
 
+    def test_state_nodes_follow_their_items(self) -> None:
+        from ..data_lab import LAB_ITEMS, LAB_STATE_NODES
+        self.assertEqual(LAB_ITEMS[-3:], list(LAB_STATE_NODES))  # appended: older lab item ids unchanged
+        session = Session(json.loads(json.dumps(self.multiworld.worlds[self.player].fill_slot_data())))
+        self.assertEqual(session.lab_held(), {24: False, 25: False, 30: False})
+        session.apply_received_item_names(["Collect Research Papers (Roll Out the Research)"])
+        self.assertEqual(session.lab_held()[24], True)
+
+    def test_state_node_targets(self) -> None:
+        from ..data_lab import lab_state_target
+        held = {24: False, 25: True, 30: False}
+        self.assertEqual(lab_state_target(24, 2, held, set()), 2)  # not bought: open
+        self.assertEqual(lab_state_target(24, 3, held, set()), 1)  # just bought, no item: locked (check sent)
+        self.assertEqual(lab_state_target(30, 2, held, {"Sensor of the Heart"}), 1)  # bought earlier: stays locked
+        self.assertEqual(lab_state_target(25, 2, held, set()), 3)  # item in: done
+        self.assertEqual(lab_state_target(5, 1, held, set()), 2)  # other nodes: opened
+        self.assertEqual(lab_state_target(5, 3, held, set()), 3)
+
     def test_lab_lists_its_nodes_on_the_cursor_panel(self) -> None:
         from ..data_save import QUEST_STATE_IDS
         session = Session(json.loads(json.dumps(self.multiworld.worlds[self.player].fill_slot_data())))
@@ -184,6 +262,8 @@ class TestLabChecks(WorldTestBase):
         self.assertEqual(world.group_copies.get("EX Ability (Hasty Recovery)"), 1)
         self.assertIn("EX A Royal Gift for Mipha", world.emptied_quests)
         self.assertIn("Weapon: Serene Champion's Spear", world.forced_items)
+        from ..data_rewards import MASTER_CHEF_ITEM  # its trade pays nothing exactly when its item is in the seed
+        self.assertEqual(bool(world.group_copies.get(MASTER_CHEF_ITEM)), "The Master Chef" in world.emptied_quests)
         data = world.fill_slot_data()
         self.assertEqual(len(data["lab_ids"]), 35)
 
@@ -204,7 +284,7 @@ class TestLabConditionsInLogic(WorldTestBase):
         from ..regions import cleared_event
         from ..rules import lab_needs
         world = self.multiworld.worlds[self.player]
-        self.assertEqual(lab_needs(world, "Power Play: Nice and Icy")[0], ["Rune: Cryonis"])
+        self.assertEqual(lab_needs(world, "Power Play: Nice and Icy"), ([], []))  # runes are given from the start
         self.assertEqual(lab_needs(world, "Power Play: Bombs Away"), ([], []))
         needs = lab_needs(world, "Ride On")
         self.assertIn("Character: Zelda", needs[0])
@@ -241,6 +321,27 @@ class TestLabValues(unittest.TestCase):
             ledger.apply(["Research Rewards (Cold Desert Nights)"], set(), live)
             self.assertEqual(live.calls, [(50, 3, 20)])
 
+    def test_master_chef_item_gives_its_rupees_once(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from ..client import delivery as D
+        from ..data_rewards import ALL_GROUPS, MASTER_CHEF_ITEM, SPLIT_INTO
+
+        self.assertEqual(ALL_GROUPS[MASTER_CHEF_ITEM].known, ("The Master Chef",))  # now counted, so it is in the pool
+        self.assertIn(MASTER_CHEF_ITEM, SPLIT_INTO["Progressive Cooking Lesson"])
+
+        class Live:
+            def __init__(self): self.rupees = []
+            def add_rupees(self, amount): self.rupees.append(amount); return "ok"
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(D, "STATE_DIR", Path(d)):
+            ledger = D.Delivery("seed", "slot")
+            live = Live()
+            self.assertEqual(ledger.pending([MASTER_CHEF_ITEM]), [MASTER_CHEF_ITEM])
+            ledger.apply([MASTER_CHEF_ITEM], set(), live)
+            ledger.apply([MASTER_CHEF_ITEM], set(), live)
+            self.assertEqual(live.rupees, [1000])
+
 
 class TestBoughtQuestKeepsNoReward(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
@@ -253,3 +354,59 @@ class TestBoughtQuestKeepsNoReward(WorldTestBase):
         self.assertEqual(session.reward_writes()[key], 0)
         session.apply_received_item_names(["Recipe (Best-Ever Batter)"])
         self.assertEqual(session.reward_writes()[key], 1)
+
+
+class BorrowedPartyTests(WorldTestBase):
+    """story_party borrowed (0.9.87, user): forced heroes you lack are lent for that mission only."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"story_party": "borrowed", "challenge_checks": True}
+
+    def test_lends_only_the_selected_missions_missing_heroes(self) -> None:
+        from ..data_save import MISSION_FORCED_HEROES
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertTrue(session.story_party_borrowed and session.heroes_optional)
+        self.assertFalse(session.story_party_free)  # parties are not replaced
+        mission = "Road to the Ancient Lab"
+        lent = session.lent_heroes(mission)
+        self.assertEqual(lent, set(MISSION_FORCED_HEROES[mission]) - set(session.unlocked_characters))
+        self.assertEqual(session.lent_heroes(None), set())
+        self.assertEqual(session.waiting_for_heroes(), {})  # nothing waits for a hero: they are lent
+
+    def test_challenges_need_no_hero_items_in_logic(self) -> None:
+        from ..rules import challenge_requirements
+        for name in self.world.active_challenges:
+            needs = challenge_requirements(self.world, name)
+            self.assertFalse([r for r in needs if isinstance(r, str) and r.startswith("Character: ")], name)
+
+
+class ChallengeUnlockItemTests(WorldTestBase):
+    """challenge_unlock_order items (0.9.87, user: default off): each challenge opens with its own unlock item."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"challenge_unlock_order": "items", "challenge_checks": True}
+
+    def test_items_logic_and_client(self) -> None:
+        from ..items import unlock_item
+        from ..data_save import MISSION_RECORD_IDS
+        world = self.world
+        self.assertTrue(world.challenge_item_unlocks)
+        pool = {i.name for i in self.multiworld.get_items() if i.player == self.player}
+        self.assertTrue({unlock_item(c) for c in world.challenge_item_unlocks} <= pool)
+        name = next(c for c in world.challenge_item_unlocks if c in MISSION_RECORD_IDS and c.startswith("Mipha"))
+        session = Session(json.loads(json.dumps(world.fill_slot_data())))
+        record = MISSION_RECORD_IDS[name][0]
+        self.assertEqual(session.challenge_unlocks()[record], (record,))  # closed
+        session.apply_received_item_names([unlock_item(name)])
+        self.assertEqual(session.challenge_unlocks()[record], ())  # opened by its item
+        self.assertFalse({n for n in world.options.start_hints.value if n[len("Unlock: "):] in world.challenge_item_unlocks})
+
+    def test_default_is_off(self) -> None:
+        from ..options import ChallengeUnlockOrder
+        self.assertNotEqual(ChallengeUnlockOrder.default, ChallengeUnlockOrder.option_items)
+
+
+class ChallengeUnlockItemsNeedChecksTests(WorldTestBase):
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"challenge_unlock_order": "items", "challenge_checks": False}
+
+    def test_falls_back_without_challenge_checks(self) -> None:
+        self.assertEqual(self.world.challenge_item_unlocks, [])

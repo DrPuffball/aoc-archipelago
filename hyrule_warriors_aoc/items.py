@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .data_challenges import DLC_STORY_MISSIONS
+from .data_challenges import CHALLENGES, DLC_STORY_MISSIONS
 from typing import TYPE_CHECKING
 
 from BaseClasses import Item, ItemClassification
@@ -88,6 +88,7 @@ _register([g.item for g in REWARD_GROUPS], 900, 50)
 _register([g.item for g in INDIVIDUAL_GROUPS], 1000, 200)  # 0.9.78: one item per individual reward
 _register([g.item for g in DIRECT_GROUPS], 1200, 100)  # 0.9.81: rewards given directly (EX abilities, research)
 _register(LAB_ITEMS, 1300, 50)  # 0.9.81: Royal Ancient Lab rewards
+_register([unlock_item(c.name) for c in CHALLENGES if c.name not in DLC_STORY_MISSIONS], 1400, 400)  # 0.9.87: challenge_unlock_order items
 
 UPGRADE_FAMILIES = set(CHARACTER_UPGRADES)
 
@@ -202,6 +203,8 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
                    if m not in world.starting_unlocks
                    and not (m == FINAL_MISSION and options.final_mission_goal)]  # opens by the goal's counts
         wanted += [unlock_item(m) for m in world.dlc_story]  # DLC story missions open by their own items too
+    story_unlocks = {name for name in wanted if name.startswith(UNLOCK_PREFIX)}
+    wanted += [unlock_item(c) for c in world.challenge_item_unlocks]  # 0.9.87: challenge_unlock_order items
     wanted += [character_item(c) for c in world.characters if c not in world.starting_characters]
     wanted += list(world.forced_items)  # weapons a lab node or royal gift stands for: their only source
     wanted += [f"Feature: {f}" for f in sorted(f for f in FEATURES if f in options.locked_features.value)
@@ -209,7 +212,7 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
     if options.sheikah_runes == SheikahRunes.option_shuffled:
         wanted += [rune_item(r) for r in ITEM_RUNES]  # Remote Bombs is the Slate: always yours
     if options.hint_mission_unlocks:  # free hints at the room start (user options)
-        options.start_hints.value |= {name for name in wanted if name.startswith(UNLOCK_PREFIX)}
+        options.start_hints.value |= story_unlocks  # (not the challenge unlocks: far too many to hint)
     if options.hint_heroes:
         options.start_hints.value |= {character_item(c) for c in world.characters if c not in world.starting_characters}
 

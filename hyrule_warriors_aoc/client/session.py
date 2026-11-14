@@ -161,6 +161,7 @@ class Session:
         self.post_story_quests: list[str] = list(slot_data.get("post_story_quests", []))
         self.goal_challenge_pool: set[str] = set(slot_data.get("goal_challenge_pool", []))
         self.goal_quests = int(slot_data.get("goal_quests", 0))
+        self.goal_hope = bool(slot_data.get("goal_hope_of_all_hyrule", False))  # 0.9.87: 100% map in the goal
         self.goal_quest_pool: set[str] = set(slot_data.get("goal_quest_pool", []))
         self.dlc_location_ids: list[int] = list(slot_data.get("dlc_location_ids", []))
         # side_unlocks random (0.9.53+): challenge/quest -> completions (story clears, challenges, quests) it opens after
@@ -189,6 +190,8 @@ class Session:
         self.death_link = bool(slot_data.get("death_link", False))
         # story_party 0 = free: any party plays any story mission (the hook replaces the forced parties)
         self.story_party_free = int(slot_data.get("story_party", 0)) == 0
+        # story_party 2 = borrowed (0.9.87): forced parties stay; a forced hero you lack is lent for that mission only
+        self.story_party_borrowed = int(slot_data.get("story_party", 0)) == 2
         self.combo_copies = int(slot_data.get("combo_upgrades", 0))
         # Copies of each upgrade item the seed has (seeds before 0.9.23 lack it: the option defaults then).
         self.upgrade_copies: dict[str, int] = {"Heart Container": 1, "Special Gauge Upgrade": 1,
@@ -201,6 +204,7 @@ class Session:
         self.rune_items: list[str] = list(slot_data.get("rune_items", []))  # 0.9.58+ (see rune_flags)
         self.unlock_items = int(slot_data.get("mission_unlocks", 0)) == 1  # story missions open by unlock items
         self.mission_unlocks: set[str] = set()
+        self.challenge_item_unlocks: set[str] = set(slot_data.get("challenge_item_unlocks", ()))  # 0.9.87
         self.mission_rewards: dict = dict(slot_data.get("mission_rewards", {"mode": 0}))
         # Quest reward items: group item -> copies in the seed (absent = that reward stays vanilla).
         from ..data_rewards import canonical
@@ -337,6 +341,14 @@ class Session:
             return {}
         from ..data_lab import lab_values
         return lab_values(self.upgrades, self.lab_items)
+
+    def lab_held(self) -> dict[int, bool]:
+        """Lab nodes whose reward is the node being done (0.9.87): index -> its item received. Only for seeds that have
+        those items (older seeds keep the game's reward)."""
+        if not self.ids["lab"] or not self.include_dlc:
+            return {}
+        from ..data_lab import LAB_STATE_NODES
+        return {i: bool(self.upgrades.get(item, 0)) for item, i in LAB_STATE_NODES.items() if item in self.lab_items}
 
     def on_korok_found(self, korok: str) -> int | None:
         return self._report("korok", korok)
@@ -627,6 +639,23 @@ class Session:
         opens = (self.challenge_open_at if kind == "challenge" else self.quest_open_at).get(name)
         return opens is None or self.completions >= opens
 
+    @property
+    def heroes_optional(self) -> bool:
+        """A mission's forced heroes don't have to be yours: free parties put yours in, borrowed lends them."""
+        return self.story_party_free or self.story_party_borrowed
+
+    def lent_heroes(self, selected: str | None) -> set[str]:
+        """story_party borrowed: the forced heroes of the mission or challenge under the map cursor (or being played)
+        that you don't have yet."""
+        from ..data_challenges import CHALLENGE_BY_NAME
+        from ..data_save import MISSION_FORCED_HEROES
+        if not self.story_party_borrowed or not selected:
+            return set()
+        forced = set(MISSION_FORCED_HEROES.get(selected, ()))
+        if selected in CHALLENGE_BY_NAME:
+            forced |= set(CHALLENGE_BY_NAME[selected].required_characters)
+        return forced - set(self.unlocked_characters)
+
     def side_opened(self) -> set[str]:
         """side_unlocks random: challenges and quests opened by the completion count so far (a challenge also needs
         its forced heroes, a quest held by a reward item its item)."""
@@ -634,7 +663,7 @@ class Session:
         done = self.completions
         held = {q for q, state in self.quest_states().items() if state == -1}  # still waiting for a reward item
         quests = {q for q, at in self.quest_open_at.items() if done >= at and q not in held}
-        return quests | {c for c, at in self.challenge_open_at.items() if done >= at and (self.story_party_free or all(
+        return quests | {c for c, at in self.challenge_open_at.items() if done >= at and (self.heroes_optional or all(
             h in self.unlocked_characters for h in CHALLENGE_BY_NAME[c].required_characters))}
 
     @property
@@ -674,6 +703,15 @@ class Session:
         flags.update({r: self.runes_all or r in self.runes for r in enforced})
         return flags
 
+    def hold_rune_mission(self) -> bool | None:
+        """Rune lock: True while Road to the Ancient Lab's clear must be hidden from the game's rune check (Magnesis or
+        Stasis enforced and not yet received), False once both are in (put the clear back), None when runes aren't
+        enforced (leave it alone)."""
+        flags = self.rune_flags()
+        if "Magnesis" not in flags and "Stasis" not in flags:
+            return None
+        return not (flags.get("Magnesis", True) and flags.get("Stasis", True))
+
     def challenge_unlocks(self) -> dict[int, tuple[int, ...]]:
         """Challenge record -> story records the game should require before it opens, matching the logic: the
         challenge's gate mission, or (gate = after the whole story) its vanilla story prerequisites, else the final
@@ -697,7 +735,7 @@ class Session:
             if name.startswith("EX Alert:") and name != "EX Alert: Forgotten Temple":
                 continue  # the game opens an Alert with its monster (sighting); opened by the client it has none and
                           # crashes while loading (2026-11-02): never written, rows or map states
-            if not self.story_party_free and any(c not in self.unlocked_characters
+            if not self.heroes_optional and any(c not in self.unlocked_characters
                                                  for c in CHALLENGE_BY_NAME[name].required_characters):
                 unlocks[ids[0]] = (ids[0],)  # its own clear: closed until its forced heroes are yours
                 continue
@@ -717,6 +755,9 @@ class Session:
                 continue
             if name in self.dlc_story:  # story order: the game's own chain (story and DLC records), as in logic
                 unlocks[ids[0]] = tuple(r for r in struct.unpack_from("<5H", bytes.fromhex(vanilla)) if r)
+                continue
+            if name in self.challenge_item_unlocks:  # challenge_unlock_order items: open with its own item
+                unlocks[ids[0]] = () if name in self.mission_unlocks else (ids[0],)
                 continue
             if self.side_random and name in self.challenge_open_at:  # closed = needs its own clear (never opens)
                 unlocks[ids[0]] = () if self.side_open("challenge", name) else (ids[0],)
@@ -763,13 +804,14 @@ class Session:
         Unlock: EX Liberate the Ancient Lab arrived and nothing said why the mission didn't appear (Riju, Urbosa)."""
         from ..data_challenges import CHALLENGE_BY_NAME
         waiting = {}
-        for name in [*self.dlc_story, *self.challenge_open_at]:
+        for name in [*self.dlc_story, *self.challenge_open_at, *self.challenge_item_unlocks]:
             if name in waiting or name not in CHALLENGE_BY_NAME or name in self.challenges_done:
                 continue
-            opened = (name in self.mission_unlocks if name in self.dlc_story and self.unlock_items
+            opened = (name in self.mission_unlocks if (name in self.dlc_story and self.unlock_items)
+                      or name in self.challenge_item_unlocks
                       else name in self.challenge_open_at and self.side_open("challenge", name))
             missing = [c for c in CHALLENGE_BY_NAME[name].required_characters if c not in self.unlocked_characters]
-            if opened and missing and not self.story_party_free:  # (free parties: your heroes are put in)
+            if opened and missing and not self.heroes_optional:  # (free: your heroes go in; borrowed: lent)
                 waiting[name] = missing
         return waiting
 
@@ -785,7 +827,7 @@ class Session:
     def goal_complete(self) -> bool:
         if self.final_goal:  # clearing The Future of Hyrule (on goal_difficulty or higher) is the goal
             done = self.difficulty_cleared if self.goal_difficulty else self.cleared_missions
-            return self.final_mission in done
+            return self.final_mission in done and self.hope_done  # (Hope: the 100% map comes after it)
         return self._goal_counts_met()
 
     @property
@@ -799,6 +841,11 @@ class Session:
             return self.difficulty_cleared & set(self.story_names)
         return self.cleared_missions | (self.challenges_done & set(self.dlc_story))
 
+    @property
+    def hope_done(self) -> bool:
+        """goal_hope_of_all_hyrule: The Hope of All Hyrule is done (True when the goal doesn't need it)."""
+        return not self.goal_hope or "The Hope of All Hyrule" in self.game_done
+
     def _goal_counts_met(self, exclude_final: bool = False) -> bool:
         """The goal's clears and extras (with final_goal: what opens The Future of Hyrule, one story clear fewer and
         not counting it)."""
@@ -808,6 +855,8 @@ class Session:
             return False
         if self.side_count < self.goal_side_missions or self.quests_done < self.goal_quests:
             return False
+        if not exclude_final and not self.hope_done:  # (never a condition for The Future of Hyrule: some of the
+            return False                                # 100% map opens only after it)
         if self.goal_difficulty and sum(m in self.difficulty_cleared for m in missions) < needed:
             return False
         challenges = self.difficulty_cleared if self.goal_difficulty else self.cleared_any | self.challenges_done
@@ -857,6 +906,8 @@ class Session:
             parts.append(f"Heroes {len(set(self.all_characters) & self.unlocked_characters)}/{len(self.all_characters)}")
         if self.goal == 3:
             parts.append(f"Bosses {len(set(self.boss_rush) & self.challenges_done)}/{len(self.boss_rush)}")
+        if self.goal_hope:
+            parts.append("100% map " + ("done" if "The Hope of All Hyrule" in self.game_done else "to do"))
         text = "Goal: " + "  ·  ".join(parts)
         if self.goal_difficulty:
             text += f"  ({DIFFICULTIES[self.goal_difficulty - 1]}+)"
@@ -884,6 +935,9 @@ class Session:
                          " heroes received")
         if self.goal == 3:
             lines.append(f"Goal: {len(set(self.boss_rush) & self.challenges_done)}/{len(self.boss_rush)} boss challenges")
+        if self.goal_hope:
+            lines.append("Goal: The Hope of All Hyrule (every region's map 100%) "
+                         + ("done" if "The Hope of All Hyrule" in self.game_done else "not done yet"))
         if self.goal_complete:
             lines.append("Goal complete.")
         elif level:

@@ -612,6 +612,50 @@ class MissionStateTests(unittest.TestCase):
             self.assertEqual((row[3], row[9]), (1, 2))  # Mipha locked, Yiga open
         self.assertEqual(fake.read(block + H.MISSION_STATES_MAP[0] + 3, 1), b"\x00")  # map block: 0 = locked
 
+    def test_rune_lock_holds_roads_profile_state_only(self) -> None:
+        from ..client import live_hook as H
+        from ..client.live_hook import LiveGame
+        fake = FakeGuest()
+        profile, block = fake.base + 0xC0000, fake.base + 0xD0000
+        fake.put(fake.base + 0x1000 + H.PROFILE, struct.pack("<Q", profile))
+        fake.put(fake.base + 0x1000 + H.MISSION_STATES_BLOCK, struct.pack("<Q", block))
+        for offset in H.MISSION_STATES_PROFILE:
+            fake.put(profile + offset, bytes([0, 3, 3, 2]))
+        for offset in H.MISSION_STATES_MAP:
+            fake.put(block + offset, bytes([0, 3, 3, 2]))
+        game = LiveGame(fake)
+        game.cleared_records = lambda: {1, 2}
+        self.assertTrue(game.hold_rune_mission(True))
+        self.assertFalse(game.hold_rune_mission(True))  # already held
+        for offset in H.MISSION_STATES_PROFILE:
+            self.assertEqual(fake.read(profile + offset + 1, 3), b"\x03\x02\x02")  # only Road (record 2) held open
+        for offset in H.MISSION_STATES_MAP:
+            self.assertEqual(fake.read(block + offset + 2, 1), b"\x03")  # the map lists keep it cleared
+        self.assertTrue(game.hold_rune_mission(False))
+        for offset in H.MISSION_STATES_PROFILE:
+            self.assertEqual(fake.read(profile + offset + 2, 1), b"\x03")
+        game.cleared_records = lambda: {1}  # never cleared: nothing to put back
+        for offset in H.MISSION_STATES_PROFILE:
+            fake.put(profile + offset + 2, b"\x02")
+        self.assertFalse(game.hold_rune_mission(False))
+
+
+class DifficultySettingTests(unittest.TestCase):
+    def test_raise_difficulty_only_raises(self) -> None:
+        from ..client import live_hook as H
+        from ..client.live_hook import LiveGame
+        fake = FakeGuest()
+        opts = fake.base + 0xE0000
+        fake.put(fake.base + 0x1000 + H.OPTIONS, struct.pack("<Q", opts))
+        for k in range(4):
+            fake.put(opts + H.DIFFICULTY_SETTING + k * H.OPTIONS_COPY, b"\x02")
+        game = LiveGame(fake)
+        self.assertEqual(game.raise_difficulty(3), 2)
+        self.assertIsNone(game.raise_difficulty(3))
+        self.assertIsNone(game.raise_difficulty(2))  # never lowered
+        for k in range(4):
+            self.assertEqual(fake.read(opts + H.DIFFICULTY_SETTING + k * H.OPTIONS_COPY, 1), b"\x03")
+
 
 class NewGameWeaponTests(unittest.TestCase):
     def test_fusing_away_a_weapon_is_not_a_new_game(self) -> None:

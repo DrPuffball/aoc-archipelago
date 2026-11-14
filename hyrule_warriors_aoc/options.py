@@ -119,6 +119,18 @@ class GoalAllHeroes(Toggle):
     display_name = "Goal Needs Every Hero"
 
 
+class GoalHopeOfAllHyrule(Toggle):
+    """
+    The goal also needs The Hope of All Hyrule: every region's map 100% complete (every quest and challenge done).
+
+    A long goal. Logic expects every hero, every challenge and every quest of your seed first. With final_mission_goal,
+    clear The Future of Hyrule first (some of the map only opens after it); the goal is done once both are.
+    Not available with game_mode: challenges_only (map quests stay closed there).
+    """
+
+    display_name = "Goal Needs The Hope of All Hyrule"
+
+
 class GoalSideMissions(Range):
     """Older form: with goal: Story And Side Missions, how many challenges or quests must be completed."""
 
@@ -234,11 +246,14 @@ class StoryParty(Choice):
     Free: your own heroes. When a mission forces a hero you don't have, the client swaps in one of yours, so four heroes
     are always enough.
     Vanilla: missions keep the heroes the game forces into the party, and you need those heroes first.
+    Borrowed: missions keep the heroes the game forces into the party; a forced hero you don't have yet is lent to you
+    for that mission only (unlocked while the map cursor is on it and during the battle, locked again afterwards).
     """
 
     display_name = "Story Party"
     option_free = 0
     option_vanilla = 1
+    option_borrowed = 2
     default = option_free
 
 
@@ -361,7 +376,7 @@ class DifficultyLock(Choice):
 
     An easier clear sends nothing, opens nothing and doesn't count for the goal; the client tells you to replay it.
     Each mission's checks all come from that one clear. The Battle of Hyrule Field (cleared in the starter save) is
-    exempt. The game's own difficulty menu isn't changed.
+    exempt. The client also raises the game's difficulty setting to at least this level (on the map).
     Off: any difficulty counts.
     """
 
@@ -382,11 +397,14 @@ class ChallengeUnlockOrder(Choice):
     Randomized: a few are open at the start, and 2-4 more challenges or quests open after every completion (story clear,
     challenge or quest). The client opens them in game. Heroes and runes a challenge needs still apply.
     Vanilla: challenges open as in the game, following challenge_logic.
+    Items: each challenge opens when its own "Unlock: <challenge>" item arrives, like story missions with
+    mission_unlocks: items (needs challenge_checks; else it plays as Randomized). Adds one item per challenge.
     """
 
     display_name = "Challenge Unlock Order"
     option_randomized = 0
     option_vanilla = 1
+    option_items = 2
     default = option_randomized
 
 
@@ -613,16 +631,23 @@ class SheikahRunes(Choice):
     Shuffled: Cryonis, Magnesis and Stasis are items ("Rune: Stasis" ...), hinted for free from the start. The client
     keeps each off until you receive it. Remote Bombs is always yours (it is the Sheikah Slate itself). Cryonis is an
     item in logic only for now: outside The Battle of Hyrule Field the game gives it anyway.
+    While Magnesis or Stasis is missing, Road to the Ancient Lab shows without its COMPLETE label in the Chapters list
+    (the game hands both runes out once that mission counts as cleared).
     Vanilla: you get them in the story (Remote Bombs and Cryonis in The Battle of Hyrule Field, Magnesis and Stasis in
     Road to the Ancient Lab).
     Start With All: all four from the start.
+
+    Hidden since 0.9.87 and always Start With All (user, 2026-11-09): the game hands out Magnesis/Stasis once Road to
+    the Ancient Lab is cleared and Cryonis once Hyrule Field is; a working Magnesis/Stasis lock exists in the client
+    (hold_rune_mission) but Cryonis can't be held the same way, so runes are given from the start for now.
     """
 
     display_name = "Sheikah Slate Runes"
+    visibility = Visibility.none
     option_vanilla = 0
     option_shuffled = 1
     option_start_with_all = 2
-    default = option_shuffled
+    default = option_start_with_all
 
 
 # --- Items ----------------------------------------------------------------------------------------------------------
@@ -871,6 +896,7 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     goal_side_missions: GoalSideMissions
     goal_quests: GoalQuests
     goal_all_heroes: GoalAllHeroes
+    goal_hope_of_all_hyrule: GoalHopeOfAllHyrule
     goal_difficulty: GoalDifficulty
     difficulty_checks: DifficultyChecks
     difficulty_checks_challenges: DifficultyChecksChallenges
@@ -926,7 +952,7 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
 # no group.
 option_groups = [
     OptionGroup("Game Mode and Goal", [GameMode, IncludeDLC, FinalMissionGoal, GoalStoryMissions, GoalChallenges, GoalQuests,
-                                       GoalAllHeroes, GoalDifficulty]),
+                                       GoalAllHeroes, GoalHopeOfAllHyrule, GoalDifficulty]),
     OptionGroup("What Holds Checks", [ChallengeChecks, QuestChecks, LabChecks, WeaponChecks, SideCheckDensity,
                                       RegionHopeChecks, DifficultyChecks, DifficultyChecksChallenges, DifficultyLock]),
     OptionGroup("Story", [MissionUnlocks, StartingMissionUnlocks, FirstMission, MissionOrder, StoryParty,

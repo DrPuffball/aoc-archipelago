@@ -65,7 +65,9 @@ goal needs, and `goal_challenges`
 (0-168, default 25) how many challenge missions on top. With `final_mission_goal` (on by default) The Future of Hyrule
 has no unlock item: it opens once you have the other clears, and clearing it wins. `goal_difficulty` makes the goal's
 clears count only on that difficulty or a harder one (a harder clear counts for every easier difficulty).
-`difficulty_lock` goes further: no clear below that difficulty counts for anything.
+`difficulty_lock` goes further: no clear below that difficulty counts for anything, and the client raises the game's
+difficulty setting to at least that level whenever you are on the map.
+`goal_hope_of_all_hyrule` adds The Hope of All Hyrule (every region's map at 100%) to the goal: a very long run. With `final_mission_goal`, clear The Future of Hyrule first (some of the map opens only after it); the goal is done once both are. Not available in `challenges_only`.
 
 ## Game modes
 
@@ -89,21 +91,23 @@ defeat menu (healing and switching heroes won't save you); deaths that arrive wh
 With `challenge_unlock_order` and `quest_unlock_order` randomized (default), a random handful of challenges and
 quests is open from the start and every completion (story clear, challenge or quest) opens 2-4 more. The client opens
 and closes them in game and shows "Now open: ..." over the emulator window. Set either to vanilla to keep the game's
-own order. Maz Koshia's trial and the fairy fountain challenges still wait for their quests. When another player
+own order. `challenge_unlock_order: items` (off by default) makes every challenge open with its own
+"Unlock: <challenge>" item instead, like story missions with `mission_unlocks: items`; it needs challenge checks.
+Maz Koshia's trial and the fairy fountain challenges still wait for their quests. When another player
 releases or collects, quests whose checks are already gone are completed for you (with their reward when the client
 knows it). `region_hope_checks` makes each region's 100% "Hope" quest a check.
 
 ## Sheikah Slate runes
 
-Remote Bombs is always yours: the game ties it to the Sheikah Slate itself (without it every rune is hidden). With
-`sheikah_runes: shuffled` Cryonis, Magnesis and Stasis are items, everyone gets a free hint for where they are when
-the room starts, and the client keeps Magnesis and Stasis off until you receive them. Cryonis is an item in logic only
-for now: the game still gives it to you.
+You have all four runes (Remote Bombs, Cryonis, Magnesis, Stasis) from the start, and they are not items or checks.
+The game hands the runes out in every mission once their story missions are cleared (Hyrule Field and Road to the
+Ancient Lab), so the randomizer can't cleanly hold them back yet.
 
 ## Rules of the story
 
 Story missions start with your own heroes in their party (`story_party: free`); a hero you don't have yet is never
-forced in. Calamity Strikes needs Mipha, Daruk, Revali and Urbosa (the game traps any Champion you don't have after
+forced in. With `story_party: borrowed` missions keep their own forced heroes, and any you
+don't have are lent to you for that mission only (while the map cursor is on it and during the battle). Calamity Strikes needs Mipha, Daruk, Revali and Urbosa (the game traps any Champion you don't have after
 it). Only challenges that restrict the party in the base game (for example "Daruk's Training") need the matching hero.
 
 `mission_order` can shuffle which mission sits in each story slot. `side_missions_per_unlock` makes each

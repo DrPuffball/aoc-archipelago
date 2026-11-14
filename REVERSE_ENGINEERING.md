@@ -154,11 +154,31 @@ Unknown rewards, read from recorded hand-ins (materials were at max, so some rew
   Mighty Foe 359. Offering Help on the Road changes nothing beyond its cost. They open Trial of the Ancients.
 - Research quests (type 36): quest table `+0x3A` material index + 1, `+0x3D` outfit id: every one has a material, and
   Rumor about Skull Lake, Cold Desert Nights and Visiting a Special Shop add outfits 19, 20, 21. Amounts seen: 2-3.
+- The Master Chef (quest 377, the only type 42): a repeatable trade, `+0x0C` u32 rupees paid (1000), `+0x10` u16 count
+  (100), `+0x26` material (0xA5 Mighty Banana). No stored reward byte [hand-in diff: only the bananas and a rupee stat at
+  `[P+0x5D8]+0x19C` changed; matches online guides]. Since 0.9.87 the client zeroes `+0x0C` and its item gives the rupees.
 - Terrako's Return: profile `+0xB37` 2 -> 3 (meaning unknown). Hot Meals in a Pot: FLAGS `0x1A07`, profile `+0x2C3`.
 - Never handed in yet: 29 EX reward quests, Ancient-Material Delivery, Seething Malice, Reigning Malice, Fiery Inspiration.
 
 ### The Battle of Hyrule Field and the rune flags
 Its script sets the rune flags (story flags 0x19-0x1C) itself before the last wave and waits for them: the three moblins spawn only then [confirmed 2026-11-07: forcing Cryonis/Magnesis/Stasis off soft-locked the mission; switching them on spawned the moblins at once]. The client doesn't touch runes during that mission.
+
+### Runes come from mission clears too
+At mission load the game gives Magnesis and Stasis when their flag is set OR when Road to the Ancient Lab (mission
+record 2) is cleared [confirmed 2026-11-09 on Eden: on a save with every story mission cleared and flags 0x1B/0x1C at 0
+in all copies, all four runes were there and Stasis could be used in Relentless as a Waterfall and Road to the Ancient
+Lab; with record 2's clear times zeroed and its state lists set to open, Relentless as a Waterfall loaded with only
+Remote Bombs and Cryonis]. So the flags only hold Magnesis/Stasis back while Road to the Ancient Lab is uncleared.
+What counts is record 2's profile mission state (profile `+0x876` list, current and saved copy, value 3 = cleared):
+setting only those two bytes to 2 removed the runes; zeroing the clear times or changing the map-block lists alone
+did not [confirmed 2026-11-09]. In the save file the profile mission states are one byte per record at `0x2C3B1 +
+record`; a save with Road at 2 loads normally (the map then draws Road as available).
+Hyrule Field (record 1) gates Cryonis the same way [confirmed: Cryonis flag off + record 1 at 2 removed Cryonis], but a
+save with record 1 at 2 makes Continue start a new game (the forced opening), so it can't be held the same way.
+Remote Bombs and Cryonis behave the same way with The Battle of Hyrule Field (record 1): their flags only matter
+inside that mission [confirmed 2026-10-28]. Ruled out for Magnesis/Stasis: the rune upgrade counters (profile
+`+0x7A1..+0x7A4` zeroed, no change) and story flag 0x15 (zeroed, no change; it makes the world map replay a
+cutscene and gives Road to the Ancient Lab its first-time intro text).
 
 ### One-shot flags: never force them
 `[0x5A0]+0x65B` is the "Contributions to Hyrule" tutorial-seen flag [confirmed: forcing it to 0 replays the tutorial, and unrelated hand-ins set it]. `+0x65C` is also set by unrelated hand-ins, and `+0x651` sits beside them [guess: same kind]. The client leaves all three alone.

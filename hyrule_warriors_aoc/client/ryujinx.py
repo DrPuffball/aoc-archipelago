@@ -173,6 +173,15 @@ class Process:
         return bool(_k32.WriteProcessMemory(self.h, ctypes.c_void_p(addr), data, len(data), ctypes.byref(got))) \
             and got.value == len(data)
 
+    def age_seconds(self) -> float | None:
+        """How long ago the process started (GetProcessTimes), or None if unknown."""
+        times = [ctypes.c_ulonglong() for _ in range(4)]
+        if not _k32.GetProcessTimes(self.h, *(ctypes.byref(t) for t in times)):
+            return None
+        now = ctypes.c_ulonglong()
+        _k32.GetSystemTimeAsFileTime(ctypes.byref(now))
+        return (now.value - times[0].value) / 1e7
+
     def regions(self):
         """(base, size, state) of every region of the address space (state 0x10000 free, 0x2000 reserved, 0x1000
         committed)."""

@@ -48,6 +48,7 @@ STARTER_NOTE = ("This seed skips the forced first mission, but the starter save 
                 "is a New Game, close Age of Calamity in the emulator: the client installs the starter save (backup kept) "
                 "and you then pick Continue. Type /starter_save to force it.")
 
+EMULATOR_BOOT_SECONDS = 90  # an emulator younger than this may be booting the game: never switch saves
 REFRESH_HINT_SECONDS = 20  # how long the "pause and go back to the map" banner stays after a new seed's setup
 FLOW_PAUSED = 0x60  # mission flow state of the pause menu
 DEATH_HOLD_SECONDS = 0.1  # how often a received death re-zeroes the party's health
@@ -555,10 +556,25 @@ class AoCContext(CommonContext):
             # The Battle of Hyrule Field's script switches the runes on itself before its last wave (the three moblins) and
             # waits for them: forcing them off there soft-locked the mission [confirmed live 2026-11-07: switching them on
             # brought the moblins at once]. So the client leaves the runes alone during that mission.
-            if runes and self.live._battle_character() and (self.live.map_selection() or (0, 0))[:2] == (1, 2):
+            # Road to the Ancient Lab (record 2) is where the story hands out Magnesis and Stasis: left alone the same way
+            # [guess: its script may wait for them like Hyrule Field's].
+            in_battle = bool(self.live._battle_character())
+            if runes and in_battle and (self.live.map_selection() or (0, 0))[:2] in ((1, 2), (2, 2)):
                 runes = {}
             if runes and (changed := self.live.set_runes(runes)):
                 probe_logger.info("Sheikah Slate: %s", ", ".join(f"{r} {'given' if runes[r] else 'held back'}" for r in changed))
+            # Rune lock (0.9.87): a cleared Road to the Ancient Lab makes the game give Magnesis and Stasis whatever their
+            # flags say, so its profile state is held at "open" until both are received (map only, never mid-mission).
+            if self.session.difficulty_lock and not in_battle:  # the game's menu follows the lock (1 Normal = game 2)
+                try:
+                    if (old := self.live.raise_difficulty(self.session.difficulty_lock + 1)) is not None:
+                        logger.info("Difficulty lock: the game's difficulty was raised (it was %s).",
+                                    ("Easy", "Normal", "Hard", "Very Hard", "Apocalyptic")[old - 1])
+                except HookError as e:
+                    logger.debug("difficulty: %s", e)
+            if not in_battle and (hold := self.session.hold_rune_mission()) is not None \
+                    and self.live.hold_rune_mission(hold):
+                probe_logger.info("Rune lock: Road to the Ancient Lab %s", "held open" if hold else "cleared again")
             # The game's own unlock rules follow the multiworld: only missions the seed has opened can be started.
             opened = cleared | self.session.cleared_missions | set(self.session.available_missions())
             self.live.set_mission_states(opened)  # the map shows the change the next time it is opened
@@ -608,7 +624,8 @@ class AoCContext(CommonContext):
                 if quests := live.empty_quest_rows(session.emptied_quests):
                     probe_logger.info("Rewards taken out of %d quest rows (their items give them).", len(quests))
             if session.ids["lab"] and self._lab_ok:
-                for node in live.sync_lab(session.lab_values(), set(session.ids["lab"])):
+                for node in live.sync_lab(session.lab_values(), set(session.ids["lab"]),
+                                          session.lab_held(), set(session.done["lab"])):
                     if node not in session.done["lab"]:
                         await self._on_game_message({"type": "lab_node", "name": node})
         except Exception as e:  # never let this feature drop the game connection (tried again on reconnect)
@@ -820,7 +837,21 @@ class AoCContext(CommonContext):
         from .delivery import hero_targets
 
         received = set(self.session.unlocked_characters)
-        if self.session.story_party_free:
+        if getattr(self.session, "story_party_borrowed", False):  # forced heroes you lack, for the mission at hand
+            sel = self.live.map_selection() or (0, 0)
+            name = self.session.selection_checks(*sel)[0] if sel[1] in (2, 3) and self.session.selection_checks(*sel) else None
+            lent = self.session.lent_heroes(name)
+            # (A menu closing leaves the cursor on nothing for a moment: keep the last loan 5 s so heroes don't flicker.)
+            now = time.time()
+            if lent:
+                self._lent_last = (lent, now)
+            elif getattr(self, "_lent_last", None) and now - self._lent_last[1] < 5:
+                lent = self._lent_last[0]
+            if lent and lent != getattr(self, "_lent_logged", set()):
+                self._lent_logged = lent
+                logger.info("Borrowed for %s: %s (locked again afterwards)", name, ", ".join(sorted(lent)))
+            targets = {h: h in received or h in lent for h in HERO_SLOTS}
+        elif self.session.story_party_free:
             targets = {h: h in received for h in HERO_SLOTS}
         else:
             targets = hero_targets(received, self.session.available_missions(), MISSION_FORCED_HEROES, list(HERO_SLOTS))
@@ -1228,6 +1259,12 @@ class AoCContext(CommonContext):
             except OSError:
                 continue
             try:
+                # An emulator that just started may be booting the game: Eden reads the save before the window title
+                # or the game's code show it (2026-11-13: a starter save went in mid-boot, the game ran the old seed's
+                # save and the client counted its quests). Wait until it has run a while.
+                age = proc.age_seconds()
+                if age is not None and age < EMULATOR_BOOT_SECONDS:
+                    return True
                 if Guest.attach(proc) if emulator == "Ryujinx" else FastmemGuest.modules(proc):
                     return True
             finally:
@@ -1293,13 +1330,22 @@ class AoCContext(CommonContext):
             logger.info("Switched to this seed's own save (%s). Start Age of Calamity and pick Continue.", why)
             self._refresh_hint = True
         else:
-            data = starter_save.prepare(sorted(self.session.unlocked_characters), self.session.available_missions())
+            try:  # the seed's opening quests and challenges too, so the first map draw is right (0.9.87)
+                quests, challenges = self.session.quest_states(), self.session.challenge_unlocks()
+                extras_ok = True
+            except Exception as e:  # never let this extra stop the install
+                logger.debug("starter save extras: %s", e)
+                quests, challenges, extras_ok = {}, {}, False
+            data = starter_save.prepare(sorted(self.session.unlocked_characters), self.session.available_missions(),
+                                        quests, challenges)
             starter_save.install(path, save_copies(path), data, STATE_DIR / "backups")
             self.delivery.new_game(set())  # a fresh save: every received item is given again
             from .savefile import owned_weapons
             self.delivery.set_baseline(owned_weapons(data))  # weapons it starts with are no finds; Hyrule Field counts
             self.delivery.state["primed"] = False  # heroes get weapons and stats on the first live tick
-            self._refresh_hint = True  # the map is drawn before the client sets it up: ask for one refresh
+            # 0.9.87: the starter save already holds the seed's opening missions, quests and challenges, so the first map
+            # draw is right [confirmed on Eden 2026-11-13 with no client running]; the refresh hint is only a fallback.
+            self._refresh_hint = not extras_ok
             logger.info("Starter save installed (%s). Start Age of Calamity and pick Continue: the forced first mission "
                         "is skipped; play %s with your starting heroes.", why,
                         " or ".join(m for m in self.session.available_missions() if m != FIRST_MISSION)

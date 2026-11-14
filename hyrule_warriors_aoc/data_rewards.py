@@ -12,7 +12,8 @@ each copy worth its share when the seed has fewer copies than quests, like Combo
   unlock the quest itself is locked (kept not available) until its item arrives, then opened, so its reward can only be
          earned after the item. These quests stay checks. New seeds use it only where the quest IS the reward: Maz
          Koshia's trials (each opens the next fight) and the locked features.
-  research  the quest table row is emptied, and the item gives the materials and outfit once (delivery ledger).
+  research  the quest table row is emptied, and the item gives the materials and outfit once (delivery ledger). The
+         Master Chef uses it too: its row's rupees are emptied and the item gives 1000 rupees once.
 A quest whose bytes are not known yet (writes None) is left vanilla and not counted; the group's item only covers
 the quests before it. Labels: [survey] = seen written by that quest's hand-in; [guess] = inferred (neighbouring bytes
 or a counter rising per quest of the type).
@@ -173,7 +174,7 @@ REWARD_GROUPS: list[RewardGroup] = [
     RewardGroup("Progressive Cooking Lesson", "store",
                 ("Snowbound Cook", "Master Monster Roasts", "Expert Cooking Lesson", "The Master Chef"),
                 (((FLAGS, 0x643, 1),), ((FLAGS, 0x643, 2),), ((FLAGS, 0x643, 3), (PROFILE, 0x2D8, 1)),
-                 ())),  # The Master Chef: no known reward byte. 0x65B/0x70E/0x713 were all game-owned (see below).
+                 ())),  # The Master Chef: its reward is 1000 rupees (type 42 = banana trade, row +0x0C), no stored byte.
     # Type 34 recipes (0.9.73: store). Each quest's row (+0x38) names its recipe; the recipe is known when
     # profile + RECIPE_BASE + that number is 1 [read from the quest table; matches all 19 recipes seen handed in].
     RewardGroup("Progressive Recipe", "store", tuple(RECIPES),
@@ -303,10 +304,14 @@ for _old, _name in _SPLIT_NAMES.items():
         INDIVIDUAL_GROUPS.append(_new)
         SPLIT_INTO[_old].append(_new.item)
 # Cooking: the three lessons raise one counter (stay progressive); The Master Chef is its own reward.
+# 0.9.87: The Master Chef's reward is 1000 rupees (type 42, row +0x0C u32; a repeatable banana trade). Like research,
+# its row is emptied (the trade pays 0) and the item gives the rupees once (delivery ledger). Before 0.9.87 the item
+# had no known reward and was never in the pool.
+MASTER_CHEF_ITEM, MASTER_CHEF_QUEST, MASTER_CHEF_RUPEES = "Master Chef (The Master Chef)", "The Master Chef", 1000
 _cook = REWARD_BY_ITEM["Progressive Cooking Lesson"]
 INDIVIDUAL_GROUPS.append(RewardGroup(COOKING_LESSONS, "store", _cook.quests[:3], _cook.writes[:3]))
-INDIVIDUAL_GROUPS.append(RewardGroup("Master Chef (The Master Chef)", "store", _cook.quests[3:], _cook.writes[3:]))
-SPLIT_INTO["Progressive Cooking Lesson"] = [COOKING_LESSONS, "Master Chef (The Master Chef)"]
+INDIVIDUAL_GROUPS.append(RewardGroup(MASTER_CHEF_ITEM, "research", (MASTER_CHEF_QUEST,)))
+SPLIT_INTO["Progressive Cooking Lesson"] = [COOKING_LESSONS, MASTER_CHEF_ITEM]
 INDIVIDUAL_BY_ITEM = {g.item: g for g in INDIVIDUAL_GROUPS}
 # 0.9.81: the last "item only opens the quest" rewards become direct (new seeds; older seeds keep the items above, which
 # still open their quests). The quest stays a check; its table row is emptied so buying it gives nothing, and the item

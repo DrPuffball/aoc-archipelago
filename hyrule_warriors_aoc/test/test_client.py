@@ -285,39 +285,50 @@ class ChallengeUnlockByLevelTests(WorldTestBase):
 
 
 class RuneShuffleTests(WorldTestBase):
+    """0.9.87: sheikah_runes is hidden and forced to start_with_all. The client still enforces runes (and has the
+    Road to the Ancient Lab lock) for older shuffled seeds, simulated through the slot data."""
     game = "Hyrule Warriors Age of Calamity"
     options = {"side_content": ["Challenges"], "sheikah_runes": "shuffled"}
 
-    def test_runes_are_items_and_gate_their_challenges(self) -> None:
-        from ..items import rune_item
+    def test_shuffled_is_forced_to_start_with_all(self) -> None:
+        from ..options import SheikahRunes
+        self.assertEqual(self.world.options.sheikah_runes.value, SheikahRunes.option_start_with_all)
         pool = {i.name for i in self.multiworld.get_items() if i.player == self.player}
-        self.assertTrue({rune_item(r) for r in ("Cryonis", "Magnesis", "Stasis")} <= pool)
-        self.assertNotIn(rune_item("Remote Bombs"), pool)  # always on (the Slate)
-        # Built by hand: collect_all_but would also pick up a rune the story pacing already placed on a location.
-        from BaseClasses import CollectionState
-        state = CollectionState(self.multiworld)
-        items = self.multiworld.itempool + [loc.item for loc in self.multiworld.get_locations() if loc.item]
-        for item in items:
-            if item.player == self.player and item.name != "Rune: Stasis":
-                state.collect(item, True)
-        location = self.world.get_location("Challenge: Mastering Stasis")
-        self.assertFalse(location.access_rule(state))
-        state.collect(self.world.create_item("Rune: Stasis"), True)
-        self.assertTrue(location.access_rule(state))
+        self.assertFalse({n for n in pool if n.startswith("Rune: ")})
+        self.assertFalse({n for n in self.world.options.start_hints.value if n.startswith("Rune: ")})
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertEqual(session.rune_flags(), {"Remote Bombs": True, "Cryonis": True, "Magnesis": True, "Stasis": True})
+        self.assertIs(session.hold_rune_mission(), False)
+
+    def _old_shuffled_slot_data(self) -> dict:
+        data = json.loads(json.dumps(self.world.fill_slot_data()))
+        data["sheikah_runes"] = 1  # a seed generated with sheikah_runes: shuffled (before 0.9.87)
+        return data
 
     def test_client_enforces_three_runes_and_keeps_the_slate(self) -> None:
-        names = {i.name for i in self.multiworld.itempool}
-        self.assertNotIn("Rune: Remote Bombs", names)  # always on: it is the Sheikah Slate
-        self.assertTrue({"Rune: Cryonis", "Rune: Magnesis", "Rune: Stasis"} <= names)
-        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        session = Session(self._old_shuffled_slot_data())
         self.assertEqual(session.rune_flags(),
                          {"Remote Bombs": True, "Cryonis": False, "Magnesis": False, "Stasis": False})
         session.apply_received_item_names(["Rune: Stasis", "Rune: Cryonis"])
         self.assertEqual(session.rune_flags(),
                          {"Remote Bombs": True, "Cryonis": True, "Magnesis": False, "Stasis": True})
 
+    def test_rune_lock_holds_road_until_both_runes(self) -> None:
+        session = Session(self._old_shuffled_slot_data())
+        self.assertIs(session.hold_rune_mission(), True)
+        session.apply_received_item_names(["Rune: Stasis"])
+        self.assertIs(session.hold_rune_mission(), True)
+        session.apply_received_item_names(["Rune: Magnesis"])
+        self.assertIs(session.hold_rune_mission(), False)
+        forced = self._old_shuffled_slot_data()
+        forced["sheikah_runes"] = 2  # start_with_all: nothing held
+        self.assertIs(Session(forced).hold_rune_mission(), False)
+        vanilla = self._old_shuffled_slot_data()
+        vanilla["sheikah_runes"] = 0
+        self.assertIsNone(Session(vanilla).hold_rune_mission())
+
     def test_old_seeds_enforce_magnesis_and_stasis_only(self) -> None:
-        data = json.loads(json.dumps(self.world.fill_slot_data()))
+        data = self._old_shuffled_slot_data()
         del data["rune_items"]  # a seed from before 0.9.58
         session = Session(data)
         session.apply_received_item_names(["Rune: Stasis", "Rune: Remote Bombs"])
@@ -328,10 +339,16 @@ class RuneVanillaTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
     options = {"sheikah_runes": "vanilla"}
 
-    def test_no_rune_items_and_client_leaves_runes_alone(self) -> None:
+    def test_vanilla_is_forced_to_start_with_all(self) -> None:
         pool = {i.name for i in self.multiworld.get_items() if i.player == self.player}
         self.assertFalse({n for n in pool if n.startswith("Rune: ")})
-        self.assertEqual(Session(json.loads(json.dumps(self.world.fill_slot_data()))).rune_flags(), {})
+        self.assertTrue(all(Session(json.loads(json.dumps(self.world.fill_slot_data()))).rune_flags().values()))
+
+    def test_old_vanilla_seeds_leave_runes_alone(self) -> None:
+        data = json.loads(json.dumps(self.world.fill_slot_data()))
+        data["sheikah_runes"] = 0
+        self.assertEqual(Session(data).rune_flags(), {})
+        self.assertIsNone(Session(data).hold_rune_mission())
 
 
 class MissionUnlockItemTests(WorldTestBase):
@@ -1167,18 +1184,6 @@ class CollectedQuestTests(WorldTestBase):
         self.assertFalse(session.apply_checked_location_ids({session.ids["quest"][quest]}))  # nothing new
 
 
-class RuneHintTests(WorldTestBase):
-    """Shuffled rune items are start hints (free hints for everyone from the start)."""
-    game = "Hyrule Warriors Age of Calamity"
-    options = {"sheikah_runes": "shuffled"}
-
-    def test_runes_are_start_hints(self) -> None:
-        from ..data import ITEM_RUNES
-        from ..items import rune_item
-        self.assertTrue({rune_item(r) for r in ITEM_RUNES} <= self.world.options.start_hints.value)
-        self.assertNotIn("Rune: Remote Bombs", self.world.options.start_hints.value)
-
-
 class EffectAuditTests(unittest.TestCase):
     """The probe re-checks client effects at 20 s, 5 min and after the next mission clear."""
 
@@ -1246,6 +1251,15 @@ class StarterSaveTests(unittest.TestCase):
         self.assertEqual([prepared[o + record] for o, _ in starter_save.STATE_LISTS], [2, 2])
         hf = L.MISSION_RECORD_IDS["The Battle of Hyrule Field"][0]
         self.assertEqual([prepared[o + hf] for o, _ in starter_save.STATE_LISTS], [3, 3])  # stays cleared
+        # 0.9.87: the seed's opening quests and challenges are in it too (first map draw already right)
+        q_open, q_held = "Wanted: Shop Assistant", "Bounty of the Sea"
+        extra = starter_save.prepare([], [], {q_open: 2, q_held: -1},
+                                     {100: (hf,), 101: (101,), 102: (5,)})  # open / own clear / Daruk not cleared
+        self.assertEqual(extra[L.QUEST_STATE_SAVE + L.QUEST_STATE_IDS[q_open]], 2)
+        self.assertNotEqual(extra[L.QUEST_STATE_SAVE + L.QUEST_STATE_IDS[q_held]], 2)
+        self.assertEqual([extra[o + 100] for o, _ in starter_save.STATE_LISTS], [2, 2])
+        self.assertEqual([extra[o + 101] for o, _ in starter_save.STATE_LISTS], [1, 0])  # still locked
+        self.assertEqual([extra[o + 102] for o, _ in starter_save.STATE_LISTS], [1, 0])
 
     def test_switch_plan(self) -> None:
         from ..client.starter_save import plan_switch
@@ -1317,6 +1331,31 @@ class MapSelectionTests(WorldTestBase):
         quest = next(q for q in session.ids["quest"] if q in QUEST_STATE_IDS)
         self.assertEqual(session.selection_checks(QUEST_STATE_IDS[quest], 4), (quest, [session.ids["quest"][quest]]))
         self.assertIsNone(session.selection_checks(1, 9))
+
+
+class BootingEmulatorTests(unittest.TestCase):
+    """0.9.87: an emulator that started moments ago may be reading the save: saves are never switched then."""
+
+    def test_young_emulator_counts_as_running(self) -> None:
+        from types import SimpleNamespace
+        from unittest import mock
+        from ..client import ryujinx
+        from ..client.ap_client import AoCContext, EMULATOR_BOOT_SECONDS
+
+        class FakeProc:
+            def __init__(self, pid): self.age = ages[pid]
+            def age_seconds(self): return self.age
+            def close(self): pass
+        ctx = SimpleNamespace(_several_emulators=lambda: False)
+        with mock.patch("sys.platform", "win32"), \
+                mock.patch.object(ryujinx, "game_in_window", return_value=False), \
+                mock.patch.object(ryujinx, "Process", FakeProc), \
+                mock.patch.object(ryujinx.FastmemGuest, "modules", return_value=[]), \
+                mock.patch.object(ryujinx, "emulator_processes", return_value=[(7, "Eden")]):
+            ages = {7: 5.0}
+            self.assertTrue(AoCContext._game_running(ctx))
+            ages = {7: EMULATOR_BOOT_SECONDS + 60}
+            self.assertFalse(AoCContext._game_running(ctx))  # idle emulator, no game: saves may switch
 
 
 class SeveralEmulatorsTests(unittest.TestCase):

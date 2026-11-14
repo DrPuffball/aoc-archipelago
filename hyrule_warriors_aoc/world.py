@@ -32,7 +32,7 @@ from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHALLENGE_QUEST_PRERE
 from .data_quests import QUEST_BY_NAME, QUESTS, UNUSED_QUESTS
 from .data_quest_unlocks import GAME_QUEST_PREREQS
 from .data_lab import FUTURE_OF_HYRULE, LAB_ITEM_COPIES, LAB_MISSION_CONDITION, LAB_NODES, LAB_WEAPON_ITEMS
-from .data_rewards import (ROYAL_GIFTS, RESEARCH_REWARDS, ALL_GROUPS, SPLIT_INTO, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
+from .data_rewards import (MASTER_CHEF_ITEM, MASTER_CHEF_QUEST, ROYAL_GIFTS, RESEARCH_REWARDS, ALL_GROUPS, SPLIT_INTO, DYE_SHOP_QUEST, FEATURE_CHALLENGES, OPEN_SERVICE_QUESTS, REWARD_GROUPS, canonical,
                            reward_quest_count)
 from .data_save import BASIC_WEAPONS
 from .options import (
@@ -41,7 +41,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.86"
+WORLD_VERSION = "0.9.87"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -193,6 +193,8 @@ class AgeOfCalamityWorld(World):
         if ut:
             self._restore_ut_options()
         options = self.options
+        if not ut:  # 0.9.87 (user): all runes from the start (the game gives them out after Hyrule Field / Road anyway)
+            options.sheikah_runes.value = SheikahRunes.option_start_with_all
         if options.side_content.value == SideContent.default:  # the toggles decide unless the old list form was set
             options.side_content.value = {k for k, on in (("Weapons", options.weapon_checks), ("Challenges", options.challenge_checks),
                                                           ("Quests", options.quest_checks)) if on}
@@ -201,6 +203,10 @@ class AgeOfCalamityWorld(World):
         if options.goal_all_heroes and options.goal == Goal.option_story:
             options.goal.value = Goal.option_story_and_all_characters
         self.game_mode = options.game_mode.value
+        if options.goal_hope_of_all_hyrule and self.game_mode == GameMode.option_challenges_only:
+            # (Challenges Only keeps every map quest closed, so the map can never reach 100%.)
+            logging.warning("%s: goal_hope_of_all_hyrule can't be reached in challenges_only: turned off.", self.player_name)
+            options.goal_hope_of_all_hyrule.value = 0
         self._apply_game_mode()
 
         pool = sorted(c for c in options.starting_character_pool.value if c in self.characters)
@@ -347,6 +353,7 @@ class AgeOfCalamityWorld(World):
         o = options
         self.post_goal_side = (o.goal == Goal.option_story and not o.goal_challenges.value
                                and not o.goal_quests.value and not o.goal_difficulty.value
+                               and not o.goal_hope_of_all_hyrule  # (100% map: everything comes before the goal)
                                and o.post_story_unlock.value >= min(o.goal_story_missions.value, len(MISSIONS)))
         self.checked_challenges = set(pick([c for c in self.active_challenges
                                             if not (self.post_goal_side and _post_story_challenge(c))]))             if "Challenges" in side else set()
@@ -445,6 +452,8 @@ class AgeOfCalamityWorld(World):
                 for part in parts:  # (a quest open from the start, like the dye shop, needs no item)
                     if not set(ALL_GROUPS[part].known) <= start_done:
                         self.reward_copies[part] = reward_quest_count(ALL_GROUPS[part])
+        if self.reward_copies.get(MASTER_CHEF_ITEM):  # 0.9.87: the trade pays nothing, the item gives the rupees
+            self.emptied_quests.append(MASTER_CHEF_QUEST)
         self.group_copies = {**self.reward_copies, **extra}
         self.fairy_locked = "Fairy Fountains" in features
         # Quests whose service follows the quest state (shops, stables, the Smithy): buying is the check, the service
@@ -497,6 +506,13 @@ class AgeOfCalamityWorld(World):
         shuffled = options.side_unlocks == SideUnlocks.option_shuffled  # (old option: game_rules = both vanilla)
         self.challenge_random = (shuffled and options.challenge_unlock_order == ChallengeUnlockOrder.option_randomized
                                  or self.game_mode == GameMode.option_challenges_only)
+        # 0.9.87: challenge_unlock_order items (user: default off): every challenge opens with its own unlock item;
+        # without challenge checks there is nowhere to put them, so it plays as Randomized.
+        wants_items = options.challenge_unlock_order == ChallengeUnlockOrder.option_items and not self.game_mode
+        if wants_items and "Challenges" not in side:
+            logging.warning("%s: challenge_unlock_order items needs challenge checks: using randomized.", self.player_name)
+            self.challenge_random, wants_items = shuffled, False
+        self.challenge_item_unlocks = ([c for c in self.active_challenges if c not in self.dlc_story] if wants_items else [])
         self.quest_random = shuffled and options.quest_unlock_order == QuestUnlockOrder.option_randomized
         self.side_random = self.challenge_random or self.quest_random
         self.completion_events = ([regions.cleared_event(m) for m in self.mission_order]
@@ -876,12 +892,14 @@ class AgeOfCalamityWorld(World):
             "goal_challenge_pool": list(self.goal_challenge_pool),
             "goal_quests": min(self.options.goal_quests.value, len(self.goal_quest_pool())),
             "goal_quest_pool": sorted(self.goal_quest_pool()),
+            "goal_hope_of_all_hyrule": bool(self.options.goal_hope_of_all_hyrule),  # 0.9.87
             "dlc_story_missions": list(self.dlc_story),
             "game_mode": self.game_mode,
             "story_chain": list(self.story_chain),
             "post_story_unlock": self.options.post_story_unlock.value,
             # side_unlocks random: challenge/quest -> completions it opens after; what counts as a completion
             "side_unlocks": self.options.side_unlocks.value,
+            "challenge_item_unlocks": list(self.challenge_item_unlocks),  # 0.9.87: open by their "Unlock:" items
             "challenge_open_at": dict(self.challenge_open_at),
             "quest_open_at": dict(self.quest_open_at),
             "completion_challenges": list(self.active_challenges),

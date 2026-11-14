@@ -47,7 +47,7 @@ class LabNode(NamedTuple):
     name: str
     effect: str  # the game's reward line
     tier: int  # how deep in the tree: story clears the logic asks for first, since every node is open from the start
-    kind: str = "none"  # "weapon", "flag", "count" or "none"
+    kind: str = "none"  # "weapon", "flag", "count", "state" or "none"
     item: str | None = None  # the item that gives its reward
     writes: tuple[tuple[int, int, int], ...] = ()  # flag kind: (block, offset, value)
     condition: tuple[int, int] = (COND_NONE, 0)  # (type, target)
@@ -84,13 +84,17 @@ LAB_NODES: list[LabNode] = [
     _flag(21, "Frugal Fruit", "Apple Discount", 9, FLAGS, 0x1A03),
     _flag(22, "An Apple a Day", "More Heart Recovery from Baked Apples", 9, PROFILE, 0xC89, (COND_FIRE_ROD, 100)),
     _flag(23, "Turn Up the Heat", "Longer Rod Effects", 9, PROFILE, 0xC0F),
-    LabNode(24, "Roll Out the Research", "Collect Research Papers", 9),
-    LabNode(25, "The Technology of Disassembly", "Better Ancient Item Drops", 9),  # (state only: no byte changes)
+    # 24, 25, 30: the game reads the reward from the node being done (purchases changed only the node state [read, lab
+    # hand-in records]). 0.9.87: kind "state": the client keeps a bought node locked until its item arrives, then done.
+    LabNode(24, "Roll Out the Research", "Collect Research Papers", 9, "state", "Collect Research Papers (Roll Out the Research)"),
+    LabNode(25, "The Technology of Disassembly", "Better Ancient Item Drops", 9, "state",
+            "Better Ancient Item Drops (The Technology of Disassembly)"),
     _flag(26, "Power Play: Bombs Away", "More Remote Bomb Damage", 9, PROFILE, 0xC10, (COND_BOMBS, 100)),
     _flag(27, "Power Play: Magnetic Mayhem", "More Magnesis Damage", 9, PROFILE, 0xC11, (COND_MAGNESIS, 5)),
     _flag(28, "Power Play: Go with the Flow", "More Stasis Damage", 9, PROFILE, 0xC12, (COND_STASIS, 100)),
     _flag(29, "Power Play: Nice and Icy", "More Cryonis Damage", 9, PROFILE, 0xC13, (COND_CRYONIS, 60)),
-    LabNode(30, "Sensor of the Heart", "More Sensor-Registered Material Drops", 9),
+    LabNode(30, "Sensor of the Heart", "More Sensor-Registered Material Drops", 9, "state",
+            "More Sensor-Registered Material Drops (Sensor of the Heart)"),
     _flag(31, "The Menace of Vicious Monsters", "Challenge Vicious Monsters", 9, FLAGS, 0x1A0D),
     LabNode(32, "The Ultimate Relic", "Qualify for the Trial", 9, "count", "Progressive Relic Trial", condition=(COND_MISSION, 28)),
     LabNode(33, "The Relic of Legend", "Qualify for the Trial", 9, "count", "Progressive Relic Trial", condition=(COND_MISSION, 28)),
@@ -100,7 +104,21 @@ LAB_BY_NAME = {n.name: n for n in LAB_NODES}
 assert len(LAB_NODES) == LAB_NODE_COUNT and all(n.index == i for i, n in enumerate(LAB_NODES))
 
 # Reward items of their own (weapons are the existing weapon items). Order = item ids (append only).
-LAB_ITEMS: list[str] = list(dict.fromkeys(n.item for n in LAB_NODES if n.item and not n.item.startswith("Weapon: ")))
+LAB_ITEMS: list[str] = list(dict.fromkeys(n.item for n in LAB_NODES if n.item and not n.item.startswith("Weapon: ")
+                                          and n.kind != "state"))
+LAB_ITEMS += [n.item for n in LAB_NODES if n.kind == "state"]  # 0.9.87, appended so older item ids stay put
+LAB_STATE_NODES = {n.item: n.index for n in LAB_NODES if n.kind == "state"}
+
+
+def lab_state_target(index: int, state: int, held: dict[int, bool], bought: set[str]) -> int:
+    """The state the client keeps a lab node at (1 locked, 2 open, 3 done). Every node is open; a "state" node in held
+    (index -> its item received) is done with its item, locked once bought without it (so it can't be bought twice),
+    else open to buy."""
+    if index in held:
+        if held[index]:
+            return 3
+        return 1 if LAB_NODES[index].name in bought or state == 3 else 2
+    return 2 if state == 1 else state
 LAB_WEAPON_ITEMS = tuple(n.item for n in LAB_NODES if n.kind == "weapon")
 LAB_ITEM_COPIES = {item: sum(1 for n in LAB_NODES if n.item == item) for item in LAB_ITEMS}
 
