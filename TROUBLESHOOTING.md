@@ -4,10 +4,9 @@
 
 1. Keep the game **closed**. Open the Archipelago Launcher > **Age of Calamity Client** and connect to your room.
 2. The client puts the right save in place by itself: a new seed gets a starter save ("Starter save installed"), and a
-   seed you played before gets its own save back. Whatever save was there is backed up first.
+   seed you played before gets its own save back. Whatever save was there is backed up first. It also installs or
+   updates the "AoC Archipelago" game mod in Eden and Ryujinx.
 3. Start the game in Ryujinx or Eden and pick **Continue**.
-4. On a new seed, **pause and go back to the map once** (a banner on the emulator window asks for this) so the
-   Smithy, the Military Training Camp and every opened mission show up.
 
 The game only reads its save when it boots, so the client can only switch saves while the game is closed.
 
@@ -19,8 +18,24 @@ client says the save was set up (about 10 seconds), then start the game again. I
 a save with progress it can't place, type `/starter_save` (that save is kept in `%USERPROFILE%\AoC_Archipelago\saves`).
 
 **The Smithy, the Training Camp or new icons are missing on the map.**
-Pause and return to the map once: the map is drawn before the client finishes setting up. If the Smithy is still
+Pause and return to the map once: the map can be drawn before the client finishes setting up. If the Smithy is still
 missing, check your YAML: with `weapon_fusion: true` it opens only with the Weapon Fusion item (and its quest bought).
+
+**The client holds clears back and asks for `/accept_save`** (notice "Clears held back").
+The save in the emulator showed many clears the server has never seen, or would finish your goal at once. That usually
+means another seed's save is in the slot. Close the game and check `/saves`. Type `/accept_save` only if the save
+really is this seed's (for example you played offline for a while).
+
+**Runes: the Sheikah Slate shows runes I don't have, or none of mine.**
+The game mod isn't active. Close the emulator with the client open: it installs the mod within about 10 seconds. Check
+"AoC Archipelago" is enabled in the game's Add-Ons list (Eden: right-click the game > Properties; Ryujinx: right-click
+the game > Manage Mods). When the game starts, the client log says "Archipelago game mod active".
+
+**The frame rate stays at 30, or the game runs too fast or too slow.**
+`frame_rate` above 30 is experimental and needs the client connected and the game mod active. Check the mode with
+`/fps` and change it with `/fps 60`, `/fps unlimited` and so on. Remove any other 60 FPS cheat or mod for the game. In
+Eden keep "Fast CPU time" off (it makes the game run fast). Cutscenes, menus and the world map always stay at 30.
+`/fps off` leaves the game's frame timing alone.
 
 **The client says it can't find or read the game.**
 Load your save (the title screen isn't enough). Ryujinx: Options > Settings > System > Memory Manager Mode

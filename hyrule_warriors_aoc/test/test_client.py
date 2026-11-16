@@ -285,33 +285,47 @@ class ChallengeUnlockByLevelTests(WorldTestBase):
 
 
 class RuneShuffleTests(WorldTestBase):
-    """0.9.87: sheikah_runes is hidden and forced to start_with_all. The client still enforces runes (and has the
-    Road to the Ancient Lab lock) for older shuffled seeds, simulated through the slot data."""
+    """0.9.89: with the rune mod, shuffled makes all four runes items; older shuffled seeds (three rune items, no rune
+    mod) keep their rules, simulated through the slot data."""
     game = "Hyrule Warriors Age of Calamity"
     options = {"side_content": ["Challenges"], "sheikah_runes": "shuffled"}
 
-    def test_shuffled_is_forced_to_start_with_all(self) -> None:
-        from ..options import SheikahRunes
-        self.assertEqual(self.world.options.sheikah_runes.value, SheikahRunes.option_start_with_all)
+    def test_all_four_runes_are_items(self) -> None:
+        from ..items import rune_item
+        from ..data import RUNES
         pool = {i.name for i in self.multiworld.get_items() if i.player == self.player}
-        self.assertFalse({n for n in pool if n.startswith("Rune: ")})
-        self.assertFalse({n for n in self.world.options.start_hints.value if n.startswith("Rune: ")})
-        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
-        self.assertEqual(session.rune_flags(), {"Remote Bombs": True, "Cryonis": True, "Magnesis": True, "Stasis": True})
-        self.assertIs(session.hold_rune_mission(), False)
+        self.assertEqual({n for n in pool if n.startswith("Rune: ")}, {rune_item(r) for r in RUNES})
+        self.assertTrue({rune_item(r) for r in RUNES} <= self.world.options.start_hints.value)
+        data = json.loads(json.dumps(self.world.fill_slot_data()))
+        self.assertEqual(data["rune_mod"], 1)
+        session = Session(data)
+        self.assertFalse(any(session.mod_rune_flags().values()))
+        session.apply_received_item_names(["Rune: Stasis"])
+        self.assertEqual(session.mod_rune_flags(), {"Remote Bombs": False, "Cryonis": False, "Magnesis": False,
+                                                    "Stasis": True, "Sheikah Slate": True})
+
+    def test_bombs_challenge_needs_the_bombs_item(self) -> None:
+        name = "Mastering Remote Bombs"
+        if name not in self.world.active_challenges:
+            return
+        from ..rules import challenge_requirements
+        self.assertIn("Rune: Remote Bombs", challenge_requirements(self.world, name))
 
     def _old_shuffled_slot_data(self) -> dict:
         data = json.loads(json.dumps(self.world.fill_slot_data()))
-        data["sheikah_runes"] = 1  # a seed generated with sheikah_runes: shuffled (before 0.9.87)
+        data["rune_items"] = ["Cryonis", "Magnesis", "Stasis"]  # a 0.9.58-0.9.86 shuffled seed
+        del data["rune_mod"]
         return data
 
-    def test_client_enforces_three_runes_and_keeps_the_slate(self) -> None:
+    def test_old_seeds_enforce_three_runes_and_keep_the_slate(self) -> None:
         session = Session(self._old_shuffled_slot_data())
         self.assertEqual(session.rune_flags(),
                          {"Remote Bombs": True, "Cryonis": False, "Magnesis": False, "Stasis": False})
         session.apply_received_item_names(["Rune: Stasis", "Rune: Cryonis"])
         self.assertEqual(session.rune_flags(),
                          {"Remote Bombs": True, "Cryonis": True, "Magnesis": False, "Stasis": True})
+        self.assertEqual(session.mod_rune_flags(), {"Remote Bombs": True, "Cryonis": True, "Magnesis": False,
+                                                    "Stasis": True, "Sheikah Slate": True})
 
     def test_rune_lock_holds_road_until_both_runes(self) -> None:
         session = Session(self._old_shuffled_slot_data())
@@ -339,16 +353,17 @@ class RuneVanillaTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
     options = {"sheikah_runes": "vanilla"}
 
-    def test_vanilla_is_forced_to_start_with_all(self) -> None:
+    def test_vanilla_runes_follow_the_story(self) -> None:
         pool = {i.name for i in self.multiworld.get_items() if i.player == self.player}
         self.assertFalse({n for n in pool if n.startswith("Rune: ")})
-        self.assertTrue(all(Session(json.loads(json.dumps(self.world.fill_slot_data()))).rune_flags().values()))
-
-    def test_old_vanilla_seeds_leave_runes_alone(self) -> None:
-        data = json.loads(json.dumps(self.world.fill_slot_data()))
-        data["sheikah_runes"] = 0
-        self.assertEqual(Session(data).rune_flags(), {})
-        self.assertIsNone(Session(data).hold_rune_mission())
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertEqual(session.rune_flags(), {})  # without the mod the game hands them out itself
+        session.cleared_missions.add("The Battle of Hyrule Field")
+        self.assertEqual(session.mod_rune_flags(), {"Remote Bombs": True, "Cryonis": True, "Magnesis": False,
+                                                    "Stasis": False, "Sheikah Slate": True})
+        session.cleared_missions.add("Road to the Ancient Lab")
+        self.assertTrue(all(session.mod_rune_flags().values()))
+        self.assertIsNone(session.hold_rune_mission())
 
 
 class MissionUnlockItemTests(WorldTestBase):

@@ -217,6 +217,7 @@ class Session:
         self.pre_granted: dict[str, int] = {k: int(v) for k, v in slot_data.get("pre_granted", {}).items()}
         self.hero_level_cap = bool(slot_data.get("hero_level_cap", 0))
         self.goal_banner = bool(slot_data.get("goal_banner", 1))  # older seeds: on
+        self.frame_rate = str(slot_data.get("frame_rate", "60"))  # 0.9.89+; older seeds: 60 (the client's default)
 
         self.starting_characters: list[str] = list(slot_data["starting_characters"])
         self.unlocked_characters: set[str] = set(self.starting_characters)
@@ -578,7 +579,8 @@ class Session:
                     states[q] = 2 if self.side_open("quest", q) else -1
                 else:
                     states.pop(q, None)  # (the Smithy with Weapon Fusion: buyable like any shop quest)
-        if self.game_mode == 2:  # Challenges Only: map quests don't appear (services stay open)
+        if self.game_mode in (1, 2):  # Story Only / Challenges Only: map quests don't appear (services stay open;
+            # 0.9.89, user: in Story Only they popped up although they held no checks)
             from ..data_save import QUEST_STATE_IDS
             for q in QUEST_STATE_IDS:
                 states.setdefault(q, -1)
@@ -614,12 +616,14 @@ class Session:
         """side_unlocks random: the game's quest unlock rows follow the client (as the mission and challenge rows do),
         so the game itself never closes a quest the seed opened, nor opens one it keeps closed: an open quest needs
         nothing, a closed one needs itself (never true). Empty for other seeds (vanilla rows)."""
-        if not self.side_random:
+        hide_all = self.game_mode in (1, 2)  # Story Only / Challenges Only: hidden quests must stay closed (the game
+        # reopened The Lights of Home and Hyrule Swordfighting Academy by its own rows, user 2026-11-15)
+        if not self.side_random and not hide_all:
             return {}
         from ..data_save import QUEST_STATE_IDS
         rows = {}
         for quest, state in self.quest_states().items():
-            if quest not in self.quest_open_at:
+            if quest not in self.quest_open_at and not (hide_all and state == -1):
                 continue
             if state == 2:
                 rows[quest] = ((), ())
@@ -703,6 +707,24 @@ class Session:
         flags.update({r: self.runes_all or r in self.runes for r in enforced})
         return flags
 
+    def mod_rune_flags(self) -> dict[str, bool]:
+        """With the rune mod active the game shows exactly the runes the client writes, for every seed: rune (and
+        "Sheikah Slate", the rune menu) -> on. Shuffled: received items (runes a seed doesn't enforce stay on, as that
+        seed was generated); start with all: everything; vanilla: as the story hands them out (Remote Bombs and
+        Cryonis after The Battle of Hyrule Field, Magnesis and Stasis after Road to the Ancient Lab)."""
+        from ..data import ENFORCED_RUNES, RUNES
+        if self.runes_all:
+            have = {r: True for r in RUNES}
+        elif self.runes_shuffled:
+            enforced = self.rune_items or list(ENFORCED_RUNES)
+            have = {r: r in self.runes or r not in enforced for r in RUNES}
+        else:
+            done = self.cleared_missions | self.game_done
+            first, road = "The Battle of Hyrule Field" in done, "Road to the Ancient Lab" in done
+            have = {"Remote Bombs": first, "Cryonis": first, "Magnesis": road, "Stasis": road}
+        have["Sheikah Slate"] = any(have.values())
+        return have
+
     def hold_rune_mission(self) -> bool | None:
         """Rune lock: True while Road to the Ancient Lab's clear must be hidden from the game's rune check (Magnesis or
         Stasis enforced and not yet received), False once both are in (put the clear back), None when runes aren't
@@ -751,7 +773,8 @@ class Session:
             if name in self.dlc_story and self.unlock_items:  # a DLC story mission: open with its unlock item
                 unlocks[ids[0]] = () if name in self.mission_unlocks else (ids[0],)  # (Story Only too)
                 continue
-            if self.game_mode == 1:  # Story Only: no other challenge is part of the run (vanilla rules)
+            if self.game_mode == 1:  # Story Only: no other challenge is part of the run - closed (0.9.89, user: they
+                unlocks[ids[0]] = (ids[0],)  # popped up although they held no checks; before 0.9.89: vanilla rules)
                 continue
             if name in self.dlc_story:  # story order: the game's own chain (story and DLC records), as in logic
                 unlocks[ids[0]] = tuple(r for r in struct.unpack_from("<5H", bytes.fromhex(vanilla)) if r)

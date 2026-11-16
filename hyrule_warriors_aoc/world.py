@@ -24,6 +24,7 @@ from .data import (
     MISSION_NAMES,
     MISSIONS,
     ITEM_RUNES,
+    MOD_ITEM_RUNES,
     RUNES,
     WEAPONS,
 )
@@ -41,7 +42,7 @@ from .options import (
 )
 
 CHAINED_MISSIONS = ("Calamity Strikes", "Water and Fire", "Air and Lightning")  # never the first mission
-WORLD_VERSION = "0.9.88"
+WORLD_VERSION = "0.9.89"
 
 # side_unlocks random: side content open from the start (at least this many challenges and quests each, when there
 # are that many) and how many more open after each completion.
@@ -50,7 +51,7 @@ RANDOM_SIDE_MIN_EACH = 3
 RANDOM_SIDE_STEP = (2, 4)
 CHALLENGES_ONLY_STEP = (3, 8)  # Challenges Only: each clear opens 3-8 more (user, 2026-11-02)
 CHALLENGES_ONLY_GOAL = 50  # Challenges Only with goal_challenges 0
-CHALLENGES_ONLY_ITEM_START = 8  # Challenges Only with challenge unlock items: challenges unlocked from the start
+CHALLENGES_ONLY_ITEM_START = 12  # Challenges Only with challenge unlock items: challenges unlocked from the start
 COMPLETIONS = rules.COMPLETIONS  # state counter of completion events (kept by collect/remove)
 
 
@@ -194,8 +195,11 @@ class AgeOfCalamityWorld(World):
         if ut:
             self._restore_ut_options()
         options = self.options
-        if not ut:  # 0.9.87 (user): all runes from the start (the game gives them out after Hyrule Field / Road anyway)
-            options.sheikah_runes.value = SheikahRunes.option_start_with_all
+        # 0.9.87-0.9.88 forced start_with_all (the game gave runes out with clears); 0.9.89: the rune mod (client/
+        # rune_mod.py, installed by the client) makes runes follow the client, so the option is back (user, 2026-11-15).
+        self.item_runes = list(MOD_ITEM_RUNES)
+        if ut:
+            self.item_runes = list(ut.get("rune_items", ITEM_RUNES))
         if options.side_content.value == SideContent.default:  # the toggles decide unless the old list form was set
             options.side_content.value = {k for k, on in (("Weapons", options.weapon_checks), ("Challenges", options.challenge_checks),
                                                           ("Quests", options.quest_checks)) if on}
@@ -309,7 +313,7 @@ class AgeOfCalamityWorld(World):
             self.party_needs = {m: list(c) for m, c in ut["mission_party_any"].items()}
 
         if options.sheikah_runes == SheikahRunes.option_shuffled:  # rune items are hinted for free from the start
-            options.start_hints.value |= {items.rune_item(r) for r in ITEM_RUNES}
+            options.start_hints.value |= {items.rune_item(r) for r in self.item_runes}
         side = options.side_content.value
         boss_goal = False  # the boss rush goal was removed (user, 2026-11-02); old seeds still finish in the client
         self.boss_goal = boss_goal
@@ -879,6 +883,7 @@ class AgeOfCalamityWorld(World):
         data["pre_granted"] = dict(getattr(self, "pre_granted", {}))
         data["hero_level_cap"] = int(bool(self.options.hero_level_cap))
         data["goal_banner"] = int(bool(self.options.goal_banner))
+        data["frame_rate"] = ("60", "30", "off", "120", "unlimited")[self.options.frame_rate.value]  # 0.9.89+ (client/framerate.py)
         data["mission_rewards"] = self.mission_reward_plan()
         return {
             "world_version": WORLD_VERSION,
@@ -937,7 +942,8 @@ class AgeOfCalamityWorld(World):
             "locked_features": sorted(self.options.locked_features.value),
             "final_mission": MISSIONS[-1].name,
             "starter_save": True,
-            "rune_items": list(ITEM_RUNES),  # 0.9.58+: the client keeps Remote Bombs on and enforces these three  # the client may install the starter save (skips the forced first mission)
+            "rune_items": list(self.item_runes),  # 0.9.58-0.9.88: three (Remote Bombs always on); 0.9.89+: all four
+            "rune_mod": 1,  # 0.9.89+: generated for the rune mod (runes follow the client in every mode)  # the client may install the starter save (skips the forced first mission)
             "first_mission": self.mission_order[0],
             "weapon_ids": {n: ids[locations.weapon_location(n)] for n in self.checked_weapons},
             "challenge_ids": {n: ids[locations.challenge_location(n)] for n in sorted(self.checked_challenges)},

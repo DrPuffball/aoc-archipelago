@@ -78,7 +78,7 @@ on level clears, spread evenly (bonus checks sent with each clear); recipes are 
   their unlock items instead, as in Standard. The goal is `goal_story_missions` clears.
 - **Challenges Only:** every check is on challenge missions; story missions (except the pre-cleared Battle of
   Hyrule Field) and map quests don't appear. Each clear opens 3-8 more challenges; with
-  `challenge_unlock_order: items` each challenge opens by its own unlock item instead, and 8 start unlocked. The goal
+  `challenge_unlock_order: items` each challenge opens by its own unlock item instead, and 12 start unlocked. The goal
   is `goal_challenges` clears (0 = 50).
 
 ## Pacing and DeathLink
@@ -101,9 +101,22 @@ knows it). `region_hope_checks` makes each region's 100% "Hope" quest a check.
 
 ## Sheikah Slate runes
 
-You have all four runes (Remote Bombs, Cryonis, Magnesis, Stasis) from the start, and they are not items or checks.
-The game hands the runes out in every mission once their story missions are cleared (Hyrule Field and Road to the
-Ancient Lab), so the randomizer can't cleanly hold them back yet.
+`sheikah_runes` (default `shuffled`): all four runes from the start (`start_with_all`), `shuffled` (each rune is an item, Remote
+Bombs too) or `vanilla` (from the story: Remote Bombs and Cryonis in The Battle of Hyrule Field, Magnesis and Stasis in
+Road to the Ancient Lab).
+The unmodded game hands runes out whenever those story missions count as cleared, so the client installs a small game
+patch (the "AoC Archipelago" mod for game version 1.4.1, which also does the frame rates below) into Eden's and Ryujinx's mod folders while the emulator is
+closed. With it, the game shows exactly the runes the client gives. Start the client before the game.
+
+## Frame rate
+
+`frame_rate` (default `fps_30`, the game's own; the higher modes are experimental): `fps_60`, `fps_120` or `unlimited` let the game draw up to that many frames a second
+in gameplay (cutscenes, menus and the world map stay at the game's own 30); `fps_30` is the game's own; `off` leaves
+it alone. The game normally slows down when it can't draw its target frame rate; the client keeps it at real-time
+speed whatever your PC draws, by choosing how many of the game's 1/60 s steps each drawn frame takes. How many frames
+you get depends on your PC and emulator settings (resolution scale and GPU accuracy cost the most).
+In the client, `/fps 60`, `/fps 120`, `/fps unlimited`, `/fps 30`, `/fps off` or `/fps seed` change it for your game;
+`/fps` shows it. Remove other 60 FPS cheats for the game: they fight the client.
 
 ## Rules of the story
 

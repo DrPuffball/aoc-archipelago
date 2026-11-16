@@ -156,6 +156,33 @@ class AoCCommandProcessor(ClientCommandProcessor):
         self.output("Goal banner: " + ("on" if self.ctx.banner_on() else "off")
                     + (" (your YAML's setting)" if self.ctx.banner_pref is None else " (set with /goal_banner)"))
 
+    def _cmd_fps(self, mode: str = "") -> None:
+        """The game's frame rate in gameplay, with the game always at real-time speed: "/fps 60", "/fps 120",
+        "/fps unlimited", "/fps 30" (the game's own), "/fps off" (left alone), "/fps seed" (your YAML's frame_rate).
+        Remembered on this PC. Cutscenes, menus and the world map stay at the game's own 30. "/fps" shows the mode."""
+        from .settings import save_setting
+        mode = mode.lower()
+        if mode in ("60", "30", "120", "unlimited", "off", "seed"):
+            save_setting("frame_rate", None if mode == "seed" else mode)
+            self.ctx.apply_frame_rate_mode()
+        elif mode:
+            self.output("Use /fps 30, /fps 60, /fps 120, /fps unlimited, /fps off or /fps seed.")
+        pacer = self.ctx.pacer
+        self.output("Frame rate: " + {"60": "up to 60 FPS", "120": "up to 120 FPS", "unlimited": "unlimited",
+                                      "30": "30 FPS (the game's own)", "off": "left to the game"}[pacer.mode]
+                    + (" in gameplay, game speed kept at real time" if pacer.mode in ("60", "120", "unlimited") else "")
+                    + (" (set with /fps)" if self.ctx.fps_pref else " (your YAML's frame_rate)"))
+
+    def _cmd_accept_save(self) -> None:
+        """Send clears the client held back because the save showed many clears the server had never seen (or would
+        have completed your goal at once). Only if this really is this seed's save."""
+        if not self.ctx._held:
+            self.output("Nothing is held back.")
+            return
+        import asyncio as _a
+        _a.create_task(self.ctx.accept_held())
+        self.output(f"Sending {len(self.ctx._held)} held clears.")
+
     def _cmd_saves(self) -> None:
         """Which seed each save belongs to, and the saves kept for the seeds you're not playing right now."""
         ctx = self.ctx
@@ -254,12 +281,28 @@ class AoCContext(CommonContext):
         self._banner_tip: tuple[str, float] | None = None
         from .settings import load_settings
         self.banner_pref: bool | None = load_settings().get("goal_banner")  # /goal_banner; None = the seed's option
+        from .framerate import MODES, Pacer
+        self.fps_pref: str | None = load_settings().get("frame_rate")  # /fps; None = the seed's frame_rate
+        if self.fps_pref not in MODES:
+            self.fps_pref = None  # (an older client's "auto")
+
+        def _pacer_game():
+            from .live_hook import LiveGame
+            return LiveGame.find() if sys.platform == "win32" else None
+        self.pacer = Pacer(_pacer_game, self.fps_pref or "60")  # frame rate (client/framerate.py), own thread
+        self._fps_cheat_checked = False
+        self._held: list[dict] = []  # clears held back by the goal guard (_hold_batch) until /accept_save
+        self._hold_noted = False
+        self._save_polled = False
         self._shrink_seen: float | None = None  # when a possible New Game was first seen
         self._party_logged: list[str] | None = None
         self._rewards_logged = False
         self._rewards_ok = True
         self._save_search_at = 0.0
         self._starter_check_at = 0.0
+        self._rune_mod_check_at = 0.0
+        self._rune_mod_error = False
+        self._rune_mod_noted: bool | None = None  # rune mod seen active (True) / missing (False) in this game run
         self._starter_reason: str | None = None
         self._elsewhere_noted: str | None = None
         self._unreadable_since: float | None = None
@@ -401,6 +444,7 @@ class AoCContext(CommonContext):
             if self.live is not None:
                 self.live.close()
                 self.live = None
+                self._rune_mod_noted = None
             return
         if (other := self.save_belongs_elsewhere()) and self._game_running():  # another seed's save: hands off
             # (user, 2026-11-02: the note in the client window was easy to miss) stays up until the game is closed
@@ -414,6 +458,7 @@ class AoCContext(CommonContext):
             if self.live is not None:
                 self.live.close()
                 self.live = None
+                self._rune_mod_noted = None
             return
         if self._elsewhere_noted is not None:
             self.overlay.set_banner(None)
@@ -427,6 +472,7 @@ class AoCContext(CommonContext):
             except Exception as e:
                 logger.debug("hook attach failed: %s", e)
                 self.live = None
+                self._rune_mod_noted = None
             if self.live is None:
                 self.overlay.set_banner(None)
                 self._warn_unreadable(now)
@@ -463,7 +509,10 @@ class AoCContext(CommonContext):
                 return  # possible New Game: report and give nothing until it is confirmed
             base = set(self.delivery.state["baseline"] or ())
             new = cleared - (self._live_seen or set()) - base
+            first_read = self._live_seen is None
             self._live_seen = cleared
+            if self._hold_batch([message_for(n) for n in sorted(new)], "the game", first_read):
+                return
             self.delivery.add_progress(cleared - base)
             for name in sorted(new):
                 # (clears that hold no check - services open from the start, weapons you own - are detail, not news)
@@ -552,7 +601,21 @@ class AoCContext(CommonContext):
                 self._warn_below_goal(done)
             if self.session.death_link:
                 await self._death_link_tick()
-            runes = self.session.rune_flags()
+            self._frame_rate_tick()
+            mod = self.live.rune_mod_active()
+            if mod:  # the patched game reads only the client's rune flags: write them for every seed
+                if self._rune_mod_noted is not True:
+                    self._rune_mod_noted = True
+                    logger.info("Archipelago game mod active: runes follow the seed, and the frame rate follows /fps.")
+                    self.live.hold_rune_mission(False)  # an older client may have held Road open: put its clear back
+                if changed := self.live.set_mod_runes(self.session.mod_rune_flags()):
+                    probe_logger.info("Sheikah Slate (mod): %s", ", ".join(changed))
+            elif mod is False and self._rune_mod_noted is not False:
+                self._rune_mod_noted = False
+                if self.session.runes_shuffled and self.session.rune_items and len(self.session.rune_items) == 4:
+                    logger.warning("The rune mod isn't active in the game: close the emulator, let the client install "
+                                   "it, then start the game again. Until then the game hands out runes itself.")
+            runes = {} if mod else self.session.rune_flags()
             # The Battle of Hyrule Field's script switches the runes on itself before its last wave (the three moblins) and
             # waits for them: forcing them off there soft-locked the mission [confirmed live 2026-11-07: switching them on
             # brought the moblins at once]. So the client leaves the runes alone during that mission.
@@ -572,7 +635,7 @@ class AoCContext(CommonContext):
                                     ("Easy", "Normal", "Hard", "Very Hard", "Apocalyptic")[old - 1])
                 except HookError as e:
                     logger.debug("difficulty: %s", e)
-            if not in_battle and (hold := self.session.hold_rune_mission()) is not None \
+            if not mod and not in_battle and (hold := self.session.hold_rune_mission()) is not None \
                     and self.live.hold_rune_mission(hold):
                 probe_logger.info("Rune lock: Road to the Ancient Lab %s", "held open" if hold else "cleared again")
             # The game's own unlock rules follow the multiworld: only missions the seed has opened can be started.
@@ -612,6 +675,7 @@ class AoCContext(CommonContext):
                     pass
             self.live.close()
             self.live = None
+            self._rune_mod_noted = None
             self.overlay.set_banner(None)
 
     async def _lab_tick(self) -> None:
@@ -921,6 +985,7 @@ class AoCContext(CommonContext):
             self.room_seed = str(args.get("seed_name", ""))
         elif cmd == "Connected":
             self.session = Session(args["slot_data"])
+            self.apply_frame_rate_mode()
             asyncio.create_task(self.update_death_link(self.session.death_link), name="death link tag")
             self.session.note_activity(time.time())
             if self.session.world_version != WORLD_VERSION:
@@ -945,6 +1010,7 @@ class AoCContext(CommonContext):
             self._starter_reason = None
             self._elsewhere_noted = None
             self._first_mission_noted = False
+            self._held, self._save_polled = [], False
             self._ensure_delivery()
             self._find_save_path()
             self._selection = None
@@ -1106,6 +1172,47 @@ class AoCContext(CommonContext):
 
     # --- game -> multiworld --------------------------------------------------------------
 
+    GUARD_CLEARS = 6  # a first read with this many clears the server has never seen is held
+
+    def _hold_batch(self, messages: list[dict], where: str, first: bool) -> bool:
+        """Goal guard (2026-11-15: a save of a finished seed sat in the save slot while the ledger said it was this
+        seed's, and the client sent its clears and the goal within 2 s): the first batch of clears read after
+        connecting (save file) or attaching (game) is held when it holds GUARD_CLEARS or more checks the server
+        doesn't have, or would complete the goal. /accept_save sends them. Returns True when held."""
+        if self._held:  # already holding: keep adding, never send until accepted
+            self._held += messages
+            return True
+        if not first or not self.session or not messages:
+            return False
+        import copy
+        trial = copy.deepcopy(self.session)
+        ids = set()
+        for m in messages:
+            kind = m.get("type")
+            fn = {"mission_cleared": trial.on_mission_cleared, "challenge_cleared": trial.on_challenge_cleared,
+                  "quest_completed": trial.on_quest_completed, "weapon_obtained": trial.on_weapon_obtained}.get(kind)
+            if fn:
+                lid = fn(str(next((m[k] for k in ("mission", "challenge", "quest", "weapon") if k in m), "")))
+                if lid is not None and lid not in self.checked_locations:
+                    ids.add(lid)
+        finishes = trial.goal_complete and not self.session.goal_complete
+        if len(ids) < self.GUARD_CLEARS and not finishes:
+            return False
+        self._held = list(messages)
+        logger.warning("Held back: %s shows %d clears this seed's server has never seen%s. If you play another seed's "
+                       "save or someone else's, close the game and reconnect: the client then swaps saves. If this "
+                       "really is this seed's save (you played offline), type /accept_save to send them.",
+                       where, len(ids), " and would complete your goal" if finishes else "")
+        self.overlay.show("Clears held back: see the client (/accept_save)")
+        return True
+
+    async def accept_held(self) -> int:
+        held, self._held = self._held, []
+        for m in held:
+            await self._on_game_message(m)
+        await self._maybe_finish()
+        return len(held)
+
     async def _on_game_message(self, message: dict[str, Any]) -> None:
         if not self.session:
             return  # not connected to a slot yet; the hook will be resynced on connect
@@ -1164,9 +1271,55 @@ class AoCContext(CommonContext):
 
     # --- shutdown / ui -------------------------------------------------------------------
 
+    def apply_frame_rate_mode(self) -> None:
+        """The frame rate mode: /fps on this PC, else the seed's frame_rate option."""
+        from .framerate import MODES
+        from .settings import load_settings
+        self.fps_pref = load_settings().get("frame_rate")
+        if self.fps_pref not in MODES:
+            self.fps_pref = None
+        self.pacer.set_mode(self.fps_pref or (self.session.frame_rate if self.session else "60"))
+
+    def _frame_rate_tick(self) -> None:
+        """Frame rate (client/framerate.py): the pacer thread runs while the game is connected; warn once about other
+        frame-rate cheats, which fight it."""
+        self.pacer.start()
+        if not self._fps_cheat_checked:
+            self._fps_cheat_checked = True
+            from .framerate import fps_cheats
+            emulator = "Eden" if type(self.live.g).__name__ == "FastmemGuest" else "Ryujinx"
+            if self.pacer.mode != "off" and (found := fps_cheats(emulator)):
+                logger.warning("A frame-rate cheat is installed (%s). It fights the client's frame rate control: turn "
+                               "the cheat off in the emulator, or type /fps off to leave the frame rate to it.",
+                               ", ".join(found))
+
+    def maybe_install_rune_mod(self) -> None:
+        """Put the rune mod (client/rune_mod.py) into Eden's and Ryujinx's mod folders while no emulator runs (it is
+        read when the game boots). Checked at start and every 10 s; only writes when a copy is missing or outdated."""
+        if sys.platform != "win32" or time.time() < self._rune_mod_check_at:
+            return
+        self._rune_mod_check_at = time.time() + 10
+        from .ryujinx import emulator_processes
+        if emulator_processes():
+            return
+        from . import rune_mod
+        try:
+            rune_mod.remove_old()
+            written = rune_mod.install()
+        except OSError as e:
+            if not self._rune_mod_error:
+                logger.warning("Couldn't install the Archipelago game mod: %s", e)
+            self._rune_mod_error = True
+            return
+        self._rune_mod_error = False
+        if written:
+            logger.info("Archipelago game mod installed (%s). It works from the next time the game starts.",
+                        ", ".join(os.path.dirname(os.path.dirname(os.path.dirname(p))) for p in written))
+
     async def _save_loop(self) -> None:
         while not self.exit_event.is_set():
             await asyncio.sleep(1)
+            self.maybe_install_rune_mod()
             if not self.session or not self._ensure_delivery():
                 continue
             if sys.platform == "win32":
@@ -1175,7 +1328,11 @@ class AoCContext(CommonContext):
                 self._save_search_at = time.time() + 30  # a save made after connecting is picked up too
                 self._find_save_path()
             if self.save_watcher:
-                for m in self.save_watcher.poll():
+                batch = self.save_watcher.poll()
+                if self._hold_batch(batch, "the save file", not self._save_polled):
+                    batch = []
+                self._save_polled = True
+                for m in batch:
                     if self.session.difficulty_lock and m.get("type") in ("mission_cleared", "challenge_cleared"):
                         continue  # the save reader doesn't see difficulties: the live hook decides (_counted_clears)
                     if self.live is None:
@@ -1473,6 +1630,7 @@ class AoCContext(CommonContext):
 
     async def shutdown(self) -> None:
         self.overlay.enabled = False
+        self.pacer.stop()  # (its thread puts the game's own 30 FPS back)
         await self.bridge.stop()
         await super().shutdown()
 

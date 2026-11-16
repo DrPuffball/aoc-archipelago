@@ -1,4 +1,4 @@
-# Setup guide: Hyrule Warriors: Age of Calamity in Archipelago
+# Setup guide: Hyrule Warriors: Age of Calamity in Archipelago
 
 Going forward, development focuses on the Eden emulator: new features are built and tested on Eden first. The new Royal Ancient Lab features in 0.9.81 have been tested on Eden only.
 
@@ -24,7 +24,11 @@ No emulator, keys, firmware or game files are provided or linked here.
      was running. The client can't see the game without this.
    - **Eden:** leave **CPU accuracy on Auto** (the default). The client needs Eden's fast memory mapping, which the
      stricter accuracy settings turn off.
-3. **Have a save:** start Age of Calamity once in your emulator so a save exists. If you never played, pick New Game,
+3. **The game mod installs itself:** the client puts the "AoC Archipelago" mod into Eden and Ryujinx whenever no
+   emulator is running (start the client before the game). It shows in the game's Add-Ons list; leave it on. It makes
+   shuffled runes work and holds the optional frame-rate support. Remove any other 60 FPS cheat or mod for the game:
+   they fight it. The old "AoC Archipelago Runes" mod is removed for you.
+4. **Have a save:** start Age of Calamity once in your emulator so a save exists. If you never played, pick New Game,
    wait for the first cutscene, then close the game. Your existing save is safe: the client keeps every save it
    replaces and gives it back (see "Switching seeds").
 
@@ -51,17 +55,20 @@ most people change:
 - `difficulty_checks` (extra checks for harder clears) or `difficulty_lock` (clears below a difficulty don't count).
 - "Open from the Start" group: Sheikah Sensor, stables, shops and the dye shop open from the start (on), trackers (off).
 - `hint_mission_unlocks`, `hint_heroes`: free hints at the start. `hero_level_cap`: heroes stay at 99.
+- `sheikah_runes`: `shuffled` (default) = all four runes, Remote Bombs included, are items (uses the game mod);
+  `start_with_all` or `vanilla`.
+- `frame_rate` (experimental): `fps_30` (default, the game's own), `fps_60`, `fps_120`, `unlimited` or `off`. Above 30
+  the game stays at real speed however many frames your PC manages. Battles only; can be changed any time with `/fps`.
 - `death_link`: share deaths with the other players.
 
 ## Play
 
 1. Keep the game **closed**. Open the Archipelago Launcher > **Age of Calamity Client** and connect to the room:
    the address (for example `archipelago.gg:38281`) and your slot name.
-2. The client sets up this seed's save by itself and says so in its window ("Starter save installed").
-   A new seed starts on the world map with your random starting heroes.
+2. The client sets up this seed's save by itself and says so in its window ("Starter save installed"), and
+   installs or updates the game mod. A new seed starts on the world map with your random starting heroes.
 3. Start Age of Calamity in your emulator and pick **Continue**. The client finds the game by itself
-   ("Connected to Age of Calamity in Ryujinx" or "... in Eden"). On a new seed, pause and go back to the map once
-   (a banner asks for it) so everything the client opened shows up.
+   ("Connected to Age of Calamity in Ryujinx" or "... in Eden", then "Archipelago game mod active").
 4. Play. Everything is automatic:
    - Clears, quests and challenges you complete are sent to the multiworld.
    - Heroes, upgrades, quest rewards, runes, weapons, rupees, materials and XP you receive appear in game.
@@ -102,7 +109,10 @@ server.
 `/deliver` items waiting for the game · `/saves` which save belongs to which seed · `/sync_saves` copy your save to
 the other emulator now · `/ryujinx_folder` where the client looks for Ryujinx saves · `/starter_save` replace a save
 the client doesn't recognise (it is kept, not deleted) · `/goal_banner on|off` the goal progress banner on the map ·
-`/research on|off` game research for testers: records what the game did with each change, on your PC only.
+`/research on|off` game research for testers: records what the game did with each change, on your PC only ·
+`/fps 30|60|120|unlimited|off|seed` the frame-rate mode (experimental; `seed` goes back to your YAML's choice) ·
+`/accept_save` send the clears of a save the client held back (it holds them when a save looks like it belongs to
+another seed, for example many clears the server has never seen; only accept if the save really is this seed's).
 
 ## Troubleshooting
 
@@ -123,8 +133,12 @@ The full guide is `TROUBLESHOOTING.md`. The most common ones:
 
 ## Known limits
 
-- Remote Bombs is always yours (the game ties it to the Sheikah Slate itself); with shuffled runes, Cryonis,
-  Magnesis and Stasis are the rune items, but the game still gives you Cryonis for now (being researched).
+- Shuffled runes need the game mod (installed by the client). The Battle of Hyrule Field still starts the game
+  pre-cleared, and its moblins spawn without runes.
+- Frame rates above 30 are experimental: cutscenes, menus and the world map stay at 30; at the end of a mission the
+  frame rate can drop to 30 while the last text boxes play; flurry rushes can feel a little off above 30. How many
+  frames you get depends on your PC (the emulated CPU is the usual limit). In Eden keep "Fast CPU time" off: it makes
+  the game run fast.
 - The Expansion Pass is on by default (include_dlc): the Guardian of Remembrance missions are story missions, EX
   challenges and quests hold checks, and Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts
   stay playable but never hold checks (except Forgotten Temple). Without the DLC in your emulator, the client

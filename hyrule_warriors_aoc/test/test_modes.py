@@ -42,6 +42,24 @@ class StoryOnlyTests(WorldTestBase):
                 else w.get_location(f"Event: Challenge {third}")).access_rule
         self.assertTrue(rule(state) or third == "Calamity Strikes")
 
+    def test_challenges_and_quests_hidden(self) -> None:
+        """0.9.89 (user): challenges and map quests hold no checks in Story Only, so they don't appear."""
+        from ..data_challenges import CHALLENGE_BY_NAME
+        from ..data_save import MISSION_RECORD_IDS
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        unlocks = session.challenge_unlocks()
+        name = next(c for c in CHALLENGE_BY_NAME if c in MISSION_RECORD_IDS and c not in DLC_STORY_MISSIONS
+                    and not CHALLENGE_BY_NAME[c].is_ex and not c.startswith("EX "))
+        record = MISSION_RECORD_IDS[name][0]
+        self.assertEqual(unlocks.get(record), (record,))  # closed
+        states = session.quest_states()
+        self.assertTrue(states and all(v in (-1, 3) for v in states.values()))
+        from ..data_save import QUEST_STATE_IDS
+        rows = session.quest_rows()  # the game must not reopen them by its own unlock rows
+        for q in ("The Lights of Home", "Hyrule Swordfighting Academy"):
+            if states.get(q) == -1:
+                self.assertEqual(rows[q], ((), (QUEST_STATE_IDS[q],)))
+
     def test_client_follows_the_chain(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         chain = self.world.story_chain
@@ -284,8 +302,8 @@ class TestLabConditionsInLogic(WorldTestBase):
         from ..regions import cleared_event
         from ..rules import lab_needs
         world = self.multiworld.worlds[self.player]
-        self.assertEqual(lab_needs(world, "Power Play: Nice and Icy"), ([], []))  # runes are given from the start
-        self.assertEqual(lab_needs(world, "Power Play: Bombs Away"), ([], []))
+        self.assertEqual(lab_needs(world, "Power Play: Nice and Icy"), (["Rune: Cryonis"], []))  # rune items (0.9.89)
+        self.assertEqual(lab_needs(world, "Power Play: Bombs Away"), (["Rune: Remote Bombs"], []))
         needs = lab_needs(world, "Ride On")
         self.assertIn("Character: Zelda", needs[0])
         self.assertIn("Weapon: Master Cycle", needs[1])
@@ -449,7 +467,7 @@ class StoryOnlyUnlockItemsTests(WorldTestBase):
 
 
 class ChallengesOnlyUnlockItemsTests(WorldTestBase):
-    """Challenges Only with challenge_unlock_order: items (user, 2026-11-14): 8 start unlocked, the rest by items."""
+    """Challenges Only with challenge_unlock_order: items (user, 2026-11-14): 12 start unlocked, the rest by items."""
     game = "Hyrule Warriors Age of Calamity"
     options = {"game_mode": "challenges_only", "challenge_unlock_order": "items"}
 

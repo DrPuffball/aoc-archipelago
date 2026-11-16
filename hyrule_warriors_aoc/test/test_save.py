@@ -748,6 +748,39 @@ class RuneTests(unittest.TestCase):
             self.assertEqual(fake.read(flags + copy * 0x700 + 7, 2), bytes([0, 0]))
         self.assertEqual(game.set_runes({"Magnesis": False, "Stasis": True}), [])
 
+    def test_rune_mod_flags_and_detection(self) -> None:
+        from ..client import live_hook as H
+        from ..client.live_hook import LiveGame
+        from ..client.rune_mod import CHECK_OFFSET, CHECK_PATCHED, CHECK_VANILLA, MOD_RUNE_FLAGS
+        fake = FakeGuest()
+        block = fake.base + 0xA0000
+        fake.put(fake.base + 0x1000 + H.STORY_FLAGS, struct.pack("<Q", block))
+        flags = block + H.STORY_FLAGS_OFFSET
+        game = LiveGame(fake)
+        fake.put(H.MODULE_BASE + CHECK_OFFSET, CHECK_VANILLA)
+        self.assertIs(game.rune_mod_active(), False)
+        fake.put(H.MODULE_BASE + CHECK_OFFSET, CHECK_PATCHED)
+        self.assertIs(game.rune_mod_active(), True)
+        changed = game.set_mod_runes({"Remote Bombs": False, "Stasis": True, "Sheikah Slate": True})
+        self.assertEqual(changed, ["Sheikah Slate", "Stasis"])
+        for copy in (0, 3):
+            self.assertEqual(fake.read(flags + copy * 0x700 + MOD_RUNE_FLAGS["Stasis"], 1), bytes([1]))  # save 0x76
+            self.assertEqual(fake.read(flags + copy * 0x700 + MOD_RUNE_FLAGS["Sheikah Slate"], 1), bytes([1]))  # 0x82
+            self.assertEqual(fake.read(flags + copy * 0x700 + H.RUNE_FLAGS["Stasis"], 1), bytes([0]))  # real flag
+        self.assertEqual(game.set_mod_runes({"Stasis": True}), [])
+
+    def test_rune_mod_patch_is_bundled(self) -> None:
+        import os
+        import tempfile
+        from ..client import rune_mod
+        data = rune_mod.patch_bytes()
+        self.assertTrue(data.startswith(b"IPS32") and data.endswith(b"EEOF"))
+        with tempfile.TemporaryDirectory() as d:
+            folder = os.path.join(d, "exefs")
+            self.assertEqual(len(rune_mod.install([folder])), 1)
+            self.assertEqual(rune_mod.install([folder]), [])  # already there
+            self.assertTrue(os.path.exists(os.path.join(folder, rune_mod.BUILD_ID + ".ips")))
+
     def test_smithy_quest_marked_done_in_both_copies(self) -> None:
         from .. import data_save as S
         from ..client import live_hook as H

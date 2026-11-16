@@ -55,7 +55,20 @@ FLOW_STATE, FLOW_REQUEST = 0xB0, 0xB8
 OPTIONS, DIFFICULTY_SETTING, OPTIONS_COPY = 0x5B0, 0x123, 0xE0  # game options block: difficulty (1 Easy .. 4 Very Hard)
 FLOW_PLAYING = 0
 FLOW_OVER = (4, 12)
-FLOW_CLOCK = 0x128  # counts up during an attempt (frames at half rate); starts over on a restart [seen on Eden]
+FLOW_CLOCK = 0x128  # counts up during an attempt (60 per real second at full game speed); starts over on a restart [seen on Eden]
+# Frame-rate block (main module, the address the common 60 FPS cheat writes): u32 fps, u32 swap interval, u32 fps,
+# float fps. 30/2/30/30.0 default, 60/1/60/60.0 = 60 FPS. Read live: at 60 FPS on a machine that can't hold it the
+# mission clock ran ~50 ticks/s (the game slows down); back at 30 it ran 60 [confirmed on Eden 2026-11-15].
+FRAME_RATE_BLOCK = 0x26A2280
+FRAME_COUNTER = 0x277DBA8  # u32, +1 per drawn frame
+FRAME_STEP = 0x26A2290  # float, read by the game mod's frame-timing patch (96 sites)
+# The display's present interval (1.4.1): the graphics object's u32 at +0x2AA4 (2 = every second refresh = 30 FPS on
+# screen), passed to nvnWindowSetPresentInterval each frame (text 0x17D13E8 -> 0x9260). The block alone only changes
+# how often the game updates, which is why the old 60 FPS cheats stopped working; block 60/1 + present interval 1 =
+# real 60 FPS [confirmed on Eden 2026-11-15: Eden showed 60 FPS / 16.66 ms, frame counters 59/s]. Paths from module
+# globals to the graphics object (two, checked against each other):
+GFX_PATHS = ((0x276FD98, 0x1898), (0x2784100, 0x2F0))
+GFX_PRESENT_INTERVAL = 0x2AA4
 # (Party heroes: character objects 0x6D0 apart, +0x0 = party index. A benched hero's display HP is restored by the game
 # every frame, so a received death reaches each hero when they are switched in [Eden, 2026-11-03].)
 REWARD_SEARCH = 64 << 20  # how far from the parameter table the reward table may sit
@@ -590,6 +603,109 @@ class LiveGame:
                 changed.append(rune)
         return changed
 
+    def frame_rate(self) -> int | None:
+        """The game's frame-rate target (30 or 60) from its frame-rate block, None when unreadable."""
+        raw = self.g.read(MODULE_BASE + FRAME_RATE_BLOCK, 16)
+        if not raw:
+            return None
+        fps, interval, _, _ = struct.unpack("<IIIf", raw)
+        return fps if (fps, interval) in ((30, 2), (60, 1)) else None
+
+    def _gfx(self) -> int | None:
+        """The graphics object (GFX_PATHS), None unless both paths agree and its present interval looks right."""
+        found = []
+        for glob, off in GFX_PATHS:
+            holder = self.g.u64(MODULE_BASE + glob)
+            if not holder or not 0x1000 < holder < 1 << 40:
+                return None
+            found.append(self.g.u64(holder + off))
+        if len(set(found)) != 1 or not found[0] or not 0x1000 < found[0] < 1 << 40:
+            return None
+        raw = self.g.read(found[0] + GFX_PRESENT_INTERVAL, 4)
+        return found[0] if raw and struct.unpack("<I", raw)[0] in (0, 1, 2) else None
+
+    def set_pacing(self, cap: float | None, present: int = 1) -> None:
+        """Frame pacing (client/framerate.py): cap = frames per second the game may draw, present = display present
+        interval (1 every refresh, 0 unsynced); None puts the game's own 30 FPS back (block 30/2/30/30.0, present 2)."""
+        if cap is None:
+            self._write(MODULE_BASE + FRAME_RATE_BLOCK, struct.pack("<IIIf", 30, 2, 30, 30.0))
+            present = 2
+        else:
+            self._write(MODULE_BASE + FRAME_RATE_BLOCK, struct.pack("<IIIf", 60, 1, 60, float(cap)))
+        self.set_frame_step(2.0 if cap is None else 1.0)
+        gfx = self._gfx()
+        if gfx is not None:
+            self._write(gfx + GFX_PRESENT_INTERVAL, struct.pack("<I", present))
+
+    def set_frame_step(self, ticks: float) -> None:
+        """Game mod frame timing: the float frame step (1/60 s ticks the next frame lasts) that the patched movement
+        and timer code reads at main+0x26A2290 (client/rune_mod.py). 2.0 = the game's own 30 FPS step."""
+        raw = self.g.read(MODULE_BASE + FRAME_STEP, 4)  # (compared with memory, not a cache: the game rewrites)
+        if not raw or abs(struct.unpack("<f", raw)[0] - ticks) > 0.005:
+            self._write(MODULE_BASE + FRAME_STEP, struct.pack("<f", ticks))
+
+    def set_present(self, present: int) -> None:
+        """The display's present interval (checked against memory: the game may set it back)."""
+        gfx = self._gfx()
+        if gfx is not None and struct.unpack("<I", self.g.read(gfx + GFX_PRESENT_INTERVAL, 4))[0] != present:
+            self._write(gfx + GFX_PRESENT_INTERVAL, struct.pack("<I", present))
+
+    def in_mission(self) -> bool:
+        """A mission (battle) is loaded: its controlled character exists. False on the world map and in menus."""
+        return self._battle_character() is not None
+
+    def set_frame_cap(self, fps: float) -> None:
+        """The frame-rate float (block+0xC): the game's frame limiter, and what ~28 effect/UI timers take as the frame
+        length (1/fps). The pacer keeps it just above the frame rate reached, so both stay close to real."""
+        raw = self.g.read(MODULE_BASE + FRAME_RATE_BLOCK + 12, 4)
+        if not raw or abs(struct.unpack("<f", raw)[0] - fps) > 0.5:
+            self._write(MODULE_BASE + FRAME_RATE_BLOCK + 12, struct.pack("<f", fps))
+
+    def frame_count(self) -> int | None:
+        """A counter the game raises once per drawn frame (main+0x277DBA8, found 2026-11-15)."""
+        raw = self.g.read(MODULE_BASE + FRAME_COUNTER, 4)
+        return struct.unpack("<I", raw)[0] if raw else None
+
+    def set_steps(self, steps: int) -> None:
+        """Game steps (1/60 s ticks) the next drawn frame advances (the frame-rate block's second field)."""
+        # Compared with memory each time (2026-11-15: the game rewrites the block itself - after /fps 30 the client's
+        # cached values said 60 was set while the game sat at 30); the fps fields go back to 60 too.
+        raw = self.g.read(MODULE_BASE + FRAME_RATE_BLOCK, 12)
+        if not raw or struct.unpack("<III", raw) != (60, steps, 60):
+            self._write(MODULE_BASE + FRAME_RATE_BLOCK, struct.pack("<III", 60, steps, 60))
+
+    def battle_clock(self) -> int | None:
+        """The mission clock (flow + FLOW_CLOCK): 60 ticks per real second at full game speed, whatever the frame rate;
+        fewer when the game can't keep its frame-rate target (the game slows down)."""
+        flow = self._flow()
+        if not flow or flow[1] != FLOW_PLAYING:
+            return None
+        return struct.unpack("<I", self.g.read(flow[0] + FLOW_CLOCK, 4))[0]
+
+    def rune_mod_active(self) -> bool | None:
+        """The rune mod (client/rune_mod.py) is in the running game: True / False, None when the code can't be read."""
+        from .rune_mod import CHECK_OFFSET, CHECK_PATCHED, CHECK_VANILLA
+        code = self.g.read(MODULE_BASE + CHECK_OFFSET, 4)
+        if code == CHECK_PATCHED:
+            return True
+        return False if code == CHECK_VANILLA else None
+
+    def set_mod_runes(self, runes: dict[str, bool]) -> list[str]:
+        """Rune mod: give or take runes (and the Sheikah Slate) through the flags the patched game reads (current and
+        saved copy). The real story flags are left to the game's scripts. Returns the entries changed."""
+        from .rune_mod import MOD_RUNE_FLAGS
+        base = self._ptr(STORY_FLAGS) + STORY_FLAGS_OFFSET
+        flags = self.g.read(base, 0x7C)
+        if flags is None or max(flags) > 1:
+            raise HookError("story flags not recognised")
+        changed = []
+        for rune, have in sorted(runes.items()):
+            if flags[MOD_RUNE_FLAGS[rune]] != have:
+                for copy in STORY_FLAGS_COPIES:
+                    self._write(base + copy + MOD_RUNE_FLAGS[rune], bytes([have]))
+                changed.append(rune)
+        return changed
+
     def set_reward_bytes(self, values: dict[tuple[int, int], int]) -> list[tuple[int, int]]:
         """Force stored quest rewards ((block field, offset) -> value; data_rewards) in the current and saved copy of
         each block, so they come only from received items. Returns the (block, offset) pairs changed."""
@@ -828,6 +944,10 @@ class LiveGame:
                 for copy, icons in maps:
                     if icons is not None and icons[i] != S.QUEST_DONE:
                         self._write(map_base + copy + i, bytes([S.QUEST_DONE]))
+            if want == -1:  # hidden: the map icon goes too (it kept showing a quest the game had reopened)
+                for copy, icons in maps:
+                    if icons is not None and icons[i] == 2:
+                        self._write(map_base + copy + i, bytes([1]))
             if (want == 2 and blob[i] >= 2) or (want == -1 and blob[i] != 2):
                 continue  # already open / never undo a quest the player has handed in
             want = abs(want)

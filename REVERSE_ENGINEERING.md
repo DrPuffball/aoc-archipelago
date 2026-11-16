@@ -180,6 +180,53 @@ inside that mission [confirmed 2026-10-28]. Ruled out for Magnesis/Stasis: the r
 `+0x7A1..+0x7A4` zeroed, no change) and story flag 0x15 (zeroed, no change; it makes the world map replay a
 cutscene and gives Road to the Ancient Lab its first-time intro text).
 
+### The story flag check and the rune mod [confirmed on Eden, 2026-11-14]
+- `isStoryFlagSet(id)` = text `0x757E50` (main NSO, v1.4.1 build E5F275B5...): returns "the flag's linked mission record
+  is cleared (profile state 3) OR the flag byte is set". Flag table: param holder `[main+0x2780A38]+0x10` list, entry
+  `0xE4`, 8-byte rows, u16 linked record at `+0` (0 = none). Flag byte = Table A, id = save offset - 0x13.
+- Runes: id 6 Remote Bombs, 7 Cryonis (both linked to record 1, Hyrule Field), 8 Magnesis, 9 Stasis (record 2, Road).
+  This is why clears give runes. Found with Eden's GDB stub (read watchpoints work there; Ryujinx's don't).
+- 25 calls in the whole game. 22 pass a constant 6-9 (`mov w0,#n`): per-rune switch 0xFD310, "any rune" chain
+  0xD8683C, HUD groups 0xD89CA4/0xD8AA04/0xDB2998, and single Bombs checks 0xF83D8/0xFCC34 that gate the whole rune
+  menu. One more path picks the id from a rodata table at VA 0x1EFAAC0 = (6, 8, 9, 7). Story scripts pass the id in a
+  register (0x11B400), so they keep the real flags.
+- Unused flags (empty table row, no linked record, 0 in the 100% save): ids 96-99 (save 0x73-0x76), 111-124.
+- Rune mod (tools/selftest/make_rune_patch.py -> IPS32, offsets = VA + 0x100): the constant sites and the table point
+  at ids 96 Bombs, 97 Cryonis, 98 Magnesis, 99 Stasis; the two menu-gate sites at id 111 (Slate). Tested live: real
+  flags all 1 + mod flags 0 -> no rune menu; mod flags set mid-battle -> menu appears at once; Bombs 0, others 1,
+  Slate 1 -> menu with Stasis/Cryonis/Magnesis and an empty Bombs slot. Hyrule Field's moblins [confirmed
+  2026-11-15, user playing a new seed with no runes]: the mission's script still reads the real flags 0x19-0x1C, so
+  its last wave spawns while the rune menu stays empty.
+- Install: the client writes the patch as `<build id>.ips` into Eden `load/01002B00111A2000/AoC Archipelago/exefs/` and
+  Ryujinx `mods/contents/01002b00111a2000/AoC Archipelago/exefs/` while no emulator runs (client/rune_mod.py). It
+  sees the mod is live by reading text 0xF83D8 (`e00d8052` patched, `c0008052` vanilla).
+
+### Frame timing and game speed (the frame-rate part of the game mod) [confirmed on Eden, 2026-11-15]
+- Frame-rate block main+0x26A2280: u32 fps, u32 steps, u32 fps, float cap (vanilla 30, 2, 30, 30.0). The float caps
+  how many frames are drawn; each drawn frame advances game time by `steps` ticks of 1/60 s. So vanilla is 30 frames x
+  2 = real time, and the old 60 FPS cheats (60/1) run in slow motion whenever the PC can't reach 60.
+- The display's present interval is the graphics object's u32 `+0x2AA4` (vanilla 2), reached from
+  `[main+0x276FD98]+0x1898` or `[main+0x2784100]+0x2F0` and passed every frame to nvnWindowSetPresentInterval. It is
+  copied once at start-up, so above 30 the client sets it to 1 (0 for unlimited). This is what broke the 1.3.0-era
+  60 FPS cheats on v1.4.1: they changed the block but not the present interval.
+- Per-frame counter main+0x277DBA8 (frames drawn); mission clock at flow `+0x128` (60/s, frozen in cutscenes and the
+  pause menu).
+- 178 reads of `steps` in 83 functions; 96 are `ldr s,[x,#0x284]` (x = page main+0x26A2000, so main+0x26A2284) then `ucvtf` (step count to float, then times a
+  speed: movement, timers, animation). The mod points those at a float frame step at main+0x26A2290 (unused data,
+  set to 2.0 = vanilla) and removes the `ucvtf`. The 52 integer users (counters, compares) keep `steps`.
+- About 28 sites read the cap float as the frame length (1/fps). Pointing them at another float hung loads (the frame
+  limiter is among them), so the client keeps the cap at min(mode cap, reached fps x 1.06 + 2) instead.
+- The client's pacer (client/framerate.py), per drawn frame: integer steps from the real time owed, the float step
+  from the frame length plus a correction from its own ledger, the cap as above. Speed measured 1.00 at 30, 60, 120
+  and unlimited (about 44-57 frames/s on the test PC). Cutscenes and menus (clock frozen > 0.3 s) and the world map
+  (it animates per drawn frame, not by the step) get the vanilla block and present interval 2.
+- The game rewrites the block itself (menus, loads), so the client compares with memory every frame rather than with
+  what it last wrote.
+- Open: flurry rushes act oddly above 30 (the game writes its own frame-rate request,
+  `[[main+0x2780A70]]+0x1D58` = interval << 4 | countdown); the last ~10 s of a mission (clock stopped, player still
+  in control) fall back to 30; the world map's per-frame code; computing the frame step inside the game (an injected
+  code module) so it works without the client.
+
 ### One-shot flags: never force them
 `[0x5A0]+0x65B` is the "Contributions to Hyrule" tutorial-seen flag [confirmed: forcing it to 0 replays the tutorial, and unrelated hand-ins set it]. `+0x65C` is also set by unrelated hand-ins, and `+0x651` sits beside them [guess: same kind]. The client leaves all three alone.
 

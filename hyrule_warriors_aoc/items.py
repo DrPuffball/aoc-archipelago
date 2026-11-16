@@ -136,6 +136,10 @@ def get_filler_item_name(world: AgeOfCalamityWorld) -> str:
     return world.random.choices(list(weights), list(weights.values()))[0]
 
 
+def options_unlock_items(world: AgeOfCalamityWorld) -> bool:
+    return world.options.mission_unlocks == MissionUnlocks.option_items
+
+
 def add_bonus_checks(world: AgeOfCalamityWorld, surplus: int) -> int:
     """Spread `surplus` extra checks evenly over the story clears and the challenge checks (one at a time around
     all of them, at most BONUS_PER_MISSION / BONUS_PER_CHALLENGE each), so no single clear sends a pile of items;
@@ -144,7 +148,13 @@ def add_bonus_checks(world: AgeOfCalamityWorld, surplus: int) -> int:
                             create_location)
     # story slots before the goal, but not The Battle of Hyrule Field: the starter save has it cleared, so its checks
     # would all be sent the moment a player connects
-    order = world.mission_order[1:world.options.goal_story_missions.value]
+    if options_unlock_items(world):
+        # unlock items: any mission can be played before the goal, so all share them (user, 2026-11-15: with a goal of
+        # 3 the first two slots got ~30 each and the rest one); the goal mission itself only ends the run
+        order = [m for m in world.mission_order[1:]
+                 if not (world.options.final_mission_goal and m == FINAL_MISSION)]
+    else:  # story order: only the slots before the goal can be played before it
+        order = world.mission_order[1:world.options.goal_story_missions.value]
     challenges = sorted(world.checked_challenges)
     # (the DLC story missions are story missions: as many as a story clear)
     caps = [(m, BONUS_PER_MISSION) for m in order] + [
@@ -211,7 +221,7 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
     wanted += [f"Feature: {f}" for f in sorted(f for f in FEATURES if f in options.locked_features.value)
                if not (f == "Shops" and options.open_shops)]  # open_shops wins over a locked Shops feature
     if options.sheikah_runes == SheikahRunes.option_shuffled:
-        wanted += [rune_item(r) for r in ITEM_RUNES]  # Remote Bombs is the Slate: always yours
+        wanted += [rune_item(r) for r in world.item_runes]  # 0.9.89+: all four (rune mod)
     if options.hint_mission_unlocks:  # free hints at the room start (user options)
         options.start_hints.value |= story_unlocks  # (not the challenge unlocks: far too many to hint)
     if options.hint_heroes:

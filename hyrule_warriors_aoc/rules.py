@@ -78,7 +78,8 @@ def lab_needs(world, name: str) -> tuple[list[str], list[str]]:
     if name in LAB_MISSION_CONDITION:
         mission = LAB_MISSION_CONDITION[name]
         all_of.append(cleared_event(mission) if mission == FUTURE_OF_HYRULE else challenge_event(mission))
-    if name in LAB_RUNE_CONDITION and world.options.sheikah_runes == SheikahRunes.option_shuffled:
+    if (name in LAB_RUNE_CONDITION and world.options.sheikah_runes == SheikahRunes.option_shuffled
+            and LAB_RUNE_CONDITION[name] in world.item_runes):  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
         all_of.append(rune_item(LAB_RUNE_CONDITION[name]))
     if name in LAB_WEAPON_CONDITION:
         hero, weapons = LAB_WEAPON_CONDITION[name]
@@ -121,8 +122,8 @@ def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
         required = [cleared_event(gate) if gate else POST_STORY_EVENT]
     if name in RUNE_CHALLENGES:
         rune = RUNE_CHALLENGES[name]
-        if world.options.sheikah_runes == SheikahRunes.option_shuffled and rune in ITEM_RUNES:
-            required.append(rune_item(rune))  # (Remote Bombs is always on: the client keeps the Slate)
+        if world.options.sheikah_runes == SheikahRunes.option_shuffled and rune in world.item_runes:
+            required.append(rune_item(rune))  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
         if world.options.sheikah_runes == SheikahRunes.option_vanilla:  # the game hands it out in that mission
             required.append(cleared_event(RUNE_SOURCE[rune]))
     required += [quest_event(q) for q in world.challenge_quests.get(name, ())]  # the game's own quest gate

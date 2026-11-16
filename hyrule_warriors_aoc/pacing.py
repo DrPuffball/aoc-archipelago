@@ -219,11 +219,19 @@ def exclude_post_goal(world: AgeOfCalamityWorld) -> list[str]:
                 changed = True
     post_goal = [loc for loc in multiworld.get_locations(player)
                  if loc.address is not None and not loc.item and not loc.can_reach(state)]
+    # Bonus checks on story clears past the goal only hold filler: take them out and give that many back to pre-goal
+    # clears instead, evenly (user, 2026-11-15: 10 on late missions, 16-18 on the rest).
+    moved = _drop_post_goal_bonus(world, post_goal)
+    if moved:
+        post_goal = [loc for loc in post_goal if loc.parent_region is not None]
     filler = sum(1 for i in multiworld.itempool if i.player == player and i.filler)
     shortage = len(post_goal) - filler
+    reachable = [m for m in world.mission_order if world.get_location(mission_location(m)).can_reach(state)]
+    from .locations import challenge_location  # the DLC story missions are story missions too: same share
+    reachable += [c for c in getattr(world, "dlc_story", ()) if world.get_location(challenge_location(c)).can_reach(state)]
+    if moved:  # the dropped bonus checks come back on pre-goal clears (their items still need room)
+        add_more_bonus_checks(world, reachable, moved)
     if shortage > 0:  # more bonus checks before the goal, each with a filler item
-        reachable = [m for m in world.mission_order
-                     if world.get_location(mission_location(m)).can_reach(state)]
         added = add_more_bonus_checks(world, reachable, shortage)
         multiworld.itempool += [world.create_item(world.get_filler_item_name()) for _ in range(added)]
         filler += added
@@ -247,22 +255,52 @@ def exclude_post_goal(world: AgeOfCalamityWorld) -> list[str]:
     return excluded
 
 
+def _drop_post_goal_bonus(world: AgeOfCalamityWorld, post_goal: list) -> int:
+    """Remove story-clear bonus checks that are post-goal (all of a mission's, so numbering stays 1..n). Returns how
+    many were removed (their region link is cleared)."""
+    from .locations import bonus_location
+    names = {loc.name for loc in post_goal}
+    removed = 0
+    for mission, n in list(getattr(world, "bonus_checks", {}).items()):
+        if not n or bonus_location(mission, 1) not in names:
+            continue
+        region = world.get_region(mission)
+        for k in range(1, n + 1):
+            loc = world.get_location(bonus_location(mission, k))
+            if loc.item is None and loc in region.locations:
+                region.locations.remove(loc)
+                world.multiworld.regions.location_cache[world.player].pop(loc.name, None)
+                loc.parent_region = None
+                removed += 1
+        del world.bonus_checks[mission]
+    return removed
+
+
+def _bonus_count(world: AgeOfCalamityWorld, name: str) -> int:
+    if name in getattr(world, "dlc_story", ()):
+        return world.challenge_bonus_checks.get(name, 0)
+    return world.bonus_checks.get(name, 0)
+
+
 def add_more_bonus_checks(world: AgeOfCalamityWorld, missions: list[str], count: int) -> int:
     """Up to `count` more bonus checks spread over these story clears (BONUS_PER_MISSION each at most)."""
-    from .locations import BONUS_PER_MISSION, bonus_location, create_location
+    from .locations import BONUS_PER_MISSION, bonus_location, challenge_bonus_location, create_location
     missions = [m for m in missions if m != world.mission_order[0]]  # pre-cleared in the starter save (add_bonus_checks)
     added = 0
-    while added < count:
-        open_missions = [m for m in missions if world.bonus_checks.get(m, 0) < BONUS_PER_MISSION]
+    while added < count:  # always the clear with the fewest so far: they come out even
+        open_missions = [m for m in missions if _bonus_count(world, m) < BONUS_PER_MISSION]
         if not open_missions:
             break
-        for mission in open_missions:
-            if added >= count:
-                break
+        mission = min(open_missions, key=lambda m: _bonus_count(world, m))
+        if mission in getattr(world, "dlc_story", ()):  # a DLC story mission (a challenge record): its bonus list
+            k = world.challenge_bonus_checks.get(mission, 0) + 1
+            create_location(world, world.get_region("Side Content"), challenge_bonus_location(mission, k))
+            world.challenge_bonus_checks[mission] = k
+        else:
             k = world.bonus_checks.get(mission, 0) + 1
             create_location(world, world.get_region(mission), bonus_location(mission, k))
             world.bonus_checks[mission] = k
-            added += 1
+        added += 1
     return added
 
 

@@ -350,6 +350,7 @@ SMITHY_QUEST = "Brawny Blacksmiths"
 # 0.9.58+: Remote Bombs is always on (you start with the Slate); the other three are the rune items when shuffled.
 RUNES = ["Remote Bombs", "Cryonis", "Magnesis", "Stasis"]
 ITEM_RUNES = ["Cryonis", "Magnesis", "Stasis"]
+MOD_ITEM_RUNES = list(RUNES)  # 0.9.89+ (rune mod): all four are items, Remote Bombs included (the Slate stays usable)
 ENFORCED_RUNES = ["Magnesis", "Stasis"]  # what seeds before 0.9.58 enforce (their Bombs/Cryonis items were logic only)
 RUNE_CHALLENGES = {"Mastering Remote Bombs": "Remote Bombs", "Mastering Cryonis": "Cryonis",
                    "Mastering Magnesis": "Magnesis", "Mastering Stasis": "Stasis",

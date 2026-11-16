@@ -43,7 +43,7 @@ class GameMode(Choice):
     goal_challenges is ignored.
     Challenges Only: every check is on challenge missions. Story missions (except The Battle of Hyrule Field) and map
     quests are hidden. A few challenges are open at the start and each clear opens 3-8 more; with
-    challenge_unlock_order: items each challenge opens by its own unlock item instead (8 start unlocked). The goal is
+    challenge_unlock_order: items each challenge opens by its own unlock item instead (12 start unlocked). The goal is
     goal_challenges clears (0 = 50); the story options and final_mission_goal are ignored.
 
     Both special modes open every service (shops, stables, dye shop, Smithy, Sheikah Sensor) from the start and spread
@@ -402,7 +402,7 @@ class ChallengeUnlockOrder(Choice):
     Vanilla: challenges open as in the game, following challenge_logic.
     Items: each challenge opens when its own "Unlock: <challenge>" item arrives, like story missions with
     mission_unlocks: items (needs challenge_checks; else it plays as Randomized). Adds one item per challenge.
-    Works in game_mode challenges_only too (8 challenges start unlocked); story_only has no challenges.
+    Works in game_mode challenges_only too (12 challenges start unlocked); story_only has no challenges.
     """
 
     display_name = "Challenge Unlock Order"
@@ -632,26 +632,20 @@ class SheikahRunes(Choice):
     """
     The Sheikah Slate runes: Remote Bombs, Cryonis, Magnesis and Stasis.
 
-    Shuffled: Cryonis, Magnesis and Stasis are items ("Rune: Stasis" ...), hinted for free from the start. The client
-    keeps each off until you receive it. Remote Bombs is always yours (it is the Sheikah Slate itself). Cryonis is an
-    item in logic only for now: outside The Battle of Hyrule Field the game gives it anyway.
-    While Magnesis or Stasis is missing, Road to the Ancient Lab shows without its COMPLETE label in the Chapters list
-    (the game hands both runes out once that mission counts as cleared).
+    Shuffled: all four are items ("Rune: Stasis" ...), hinted for free from the start. The Sheikah Slate (rune menu)
+    works as soon as you have any rune. Needs the Archipelago rune mod, which the client installs into Eden and
+    Ryujinx by itself while the emulator is closed (start the client before the game). Without it the game hands
+    runes out with story clears.
     Vanilla: you get them in the story (Remote Bombs and Cryonis in The Battle of Hyrule Field, Magnesis and Stasis in
     Road to the Ancient Lab).
     Start With All: all four from the start.
-
-    Hidden since 0.9.87 and always Start With All (user, 2026-11-09): the game hands out Magnesis/Stasis once Road to
-    the Ancient Lab is cleared and Cryonis once Hyrule Field is; a working Magnesis/Stasis lock exists in the client
-    (hold_rune_mission) but Cryonis can't be held the same way, so runes are given from the start for now.
     """
 
     display_name = "Sheikah Slate Runes"
-    visibility = Visibility.none
     option_vanilla = 0
     option_shuffled = 1
     option_start_with_all = 2
-    default = option_start_with_all
+    default = option_shuffled  # 0.9.89 (user): shuffled by default, with the game mod
 
 
 # --- Items ----------------------------------------------------------------------------------------------------------
@@ -835,6 +829,28 @@ class StuckRescueMinutes(Range):
     default = 30  # (user, 2026-11-02: default run review)
 
 
+class FrameRate(Choice):
+    """
+    The game's frame rate in gameplay, set by the client, with the game kept at real-time speed at any frame rate.
+
+    60, 120, Unlimited: draw up to that many frames a second while you play (cutscenes, menus and the world map stay at
+    the game's own 30). The game advances its time in 1/60 s steps; the client chooses how many steps each drawn frame
+    takes, so a PC that draws 45 frames still plays at full speed, and above 60 some frames take none.
+    30: the game's own 30 FPS.
+    Off: the client leaves the frame rate alone (for another frame-rate mod).
+    Type "/fps 60", "/fps 120", "/fps unlimited", "/fps 30", "/fps off" or "/fps seed" in the client to change it for
+    your own game.
+    """
+
+    display_name = "Frame Rate"
+    option_fps_60 = 0
+    option_fps_30 = 1
+    option_off = 2
+    option_fps_120 = 3
+    option_unlimited = 4
+    default = option_fps_30  # 0.9.89 (user): the higher modes are experimental, off by default
+
+
 class GoalBanner(DefaultOnToggle):
     """
     A banner at the top of the emulator window with your goal progress and what to do next.
@@ -940,6 +956,7 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     hint_heroes: HintHeroes
     hero_level_cap: HeroLevelCap
     goal_banner: GoalBanner
+    frame_rate: FrameRate
     game_mode: GameMode
     start_with_sheikah_sensor: StartWithSheikahSensor
     start_with_trackers: StartWithTrackers
@@ -970,7 +987,7 @@ option_groups = [
     OptionGroup("Upgrade Items", [HeartContainers, ComboUpgrades, SpecialGaugeUpgrades, EnhancedAbilities,
                                   WeaponCapacityUpgrades, SealSlotUpgrades, WeaponItems, QuestRewardItems]),
     OptionGroup("Filler and Mission Rewards", [FillerWeights, LocalFiller, MissionRewards]),
-    OptionGroup("Hints and Help", [HintMissionUnlocks, HintHeroes, MissionHintEvery, StuckRescueMinutes, GoalBanner,
+    OptionGroup("Hints and Help", [HintMissionUnlocks, HintHeroes, MissionHintEvery, StuckRescueMinutes, GoalBanner, FrameRate,
                                    FeaturedChallenge]),
     OptionGroup("Multiworld Pacing", [SteadyRewards, StoryPacing]),
 ]

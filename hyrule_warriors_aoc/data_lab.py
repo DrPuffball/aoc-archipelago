@@ -128,7 +128,7 @@ FORGOTTEN_TEMPLE, FUTURE_OF_HYRULE = "EX Alert: Forgotten Temple", "The Future o
 LAB_MISSION_CONDITION = {"The Battle-Tested Guardian": FORGOTTEN_TEMPLE, "The Ultimate Relic": FUTURE_OF_HYRULE,
                          "The Relic of Legend": FUTURE_OF_HYRULE}
 LAB_RUNE_CONDITION = {"Power Play: Magnetic Mayhem": "Magnesis", "Power Play: Go with the Flow": "Stasis",
-                      "Power Play: Nice and Icy": "Cryonis"}
+                      "Power Play: Nice and Icy": "Cryonis", "Power Play: Bombs Away": "Remote Bombs"}
 LAB_WEAPON_CONDITION = {"Applied Research: Clawsome Power": ("Link", FLAILS),
                         "Applied Research: Magnetic Inspiration": ("Link", FLAILS),
                         "Present for the Princess": ("Zelda", CYCLES), "Ride On": ("Zelda", CYCLES)}

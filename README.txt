@@ -1,4 +1,4 @@
-HYRULE WARRIORS: AGE OF CALAMITY - ARCHIPELAGO RANDOMIZER
+HYRULE WARRIORS: AGE OF CALAMITY - ARCHIPELAGO RANDOMIZER
 =========================================================
 
 Going forward, development focuses on the Eden emulator: new features are built and tested on Eden first. The new Royal Ancient Lab features in 0.9.81 have been tested on Eden only.
@@ -38,7 +38,10 @@ INSTALLATION (ONCE)
 3. Emulator setting. Ryujinx: Options > Settings > System > Memory Manager Mode: Software, then save (the client
    can't read the game without it). Eden: leave CPU accuracy on Auto (the default).
 4. Make sure the game is updated to v1.4.1 in your emulator.
-5. Start the game once in your emulator so a save exists (if you never played: New Game, wait for the first
+5. Nothing to install in the emulator: the client puts the "AoC Archipelago" game mod into Eden and Ryujinx by
+   itself whenever no emulator is running (start the client before the game) and keeps it up to date. Leave it on in
+   the game's Add-Ons list, and remove any other 60 FPS cheat or mod for the game.
+6. Start the game once in your emulator so a save exists (if you never played: New Game, wait for the first
    cutscene, close the game).
 
 MAKING YOUR OPTIONS
@@ -63,6 +66,9 @@ this apworld installed too. The defaults are the tested setup; the options most 
 - Open from the Start: Sheikah Sensor, stables, shops and dye shop open from the start (on); trackers pre-done (off).
 - hint_mission_unlocks / hint_heroes: free hints; hero_level_cap: heroes stay at 99 (level-ups still refill you).
 - filler_weights: filler mix (default about 40% material bundles in three sizes).
+- sheikah_runes: shuffled (default; all four runes, Remote Bombs included, are items) | start_with_all | vanilla.
+- frame_rate (experimental): fps_30 (default, the game's own) | fps_60 | fps_120 | unlimited | off. Above 30 the game
+  stays at real speed however many frames your PC manages (battles only). Change it any time with /fps.
 - death_link: share deaths with the other players.
 
 GENERATING AND HOSTING A ROOM (the host does this once per run)
@@ -84,7 +90,7 @@ PLAYING
    archipelago.gg:38281, and your slot name).
 2. For a new seed the client installs a starter save by itself ("Starter save installed"): the game's forced
    opening (The Battle of Hyrule Field) comes pre-cleared, and you start on the world map with your random starting
-   heroes and the seed's first mission. Your previous save is kept (see below).
+   heroes and the seed's opening missions. Your previous save is kept (see below).
 3. Start Age of Calamity in Ryujinx or Eden and pick Continue. The client finds the game by itself.
 4. Play normally. Notices appear in the emulator window: items sent and received, what a gift went to, and - when you
    highlight a mission, challenge or quest on the world map - what its checks hold.
@@ -99,15 +105,19 @@ save back. It never replaces a save while the game runs, nor a save with progres
 (/starter_save does that on purpose, keeping a copy).
 
 Client commands (optional): /todo (goal progress, what to play), /inventory, /check_hook, /deliver, /saves, /sync_saves, /ryujinx_folder,
-/starter_save, /goal_banner, /research. Full details: SETUP_GUIDE.md.
+/starter_save, /goal_banner, /research, /fps (frame-rate mode), /accept_save. Full details: SETUP_GUIDE.md.
+
+Save safety: if the first read after connecting shows many clears the server has never seen, or would finish your
+goal at once (another seed's save in the slot), the client holds them back. Type /accept_save only if the save really
+is this seed's.
 
 HOW THE RANDOMIZER WORKS
 ------------------------
 
 - Checks: clearing story missions, challenges and quests (weapon pickups optional). When there are more items than
-  checks, a few extra "bonus" checks go on story clears and challenges.
+  checks, extra "bonus" checks are spread evenly over the missions you can play before the goal.
 - Items: heroes, per-hero upgrades (hearts, combo moves, special gauge, abilities), quest rewards, mission unlock
-  items, the Cryonis / Magnesis / Stasis runes, and filler (hero XP gifts, weapon bundles, rupees, material bundles,
+  items, the four Sheikah Slate runes (with sheikah_runes: shuffled), and filler (hero XP gifts, weapon bundles, rupees, material bundles,
   meals). Most quest-reward items give their reward directly (recipes, Sheikah Sensor, rune and stat upgrades,
   discounts, Smithy upgrades, lessons, dyes, research, Expansion Pass abilities and royal gifts). Buying the quest only
   sends its check. Maz Koshia's trials are the exception: each trial is the next fight, so its item opens the quest.
@@ -128,8 +138,10 @@ KNOWN LIMITATIONS
 
 - Windows only, game v1.4.1 only. Ryujinx needs Memory Manager Mode Software; Eden needs CPU accuracy Auto. Both are
   tested in full play (Eden 0.2.1: a whole session of missions, quests, items, DLC and save switching).
-- Remote Bombs is always yours (the game ties it to the Sheikah Slate). Cryonis is an item in logic, but the game
-  still gives it outside The Battle of Hyrule Field.
+- Shuffled runes need the game mod (the client installs it). The Battle of Hyrule Field still comes pre-cleared.
+- Frame rates above 30 are experimental: cutscenes, menus and the world map stay at 30, the end of a mission can drop
+  to 30 while the last text boxes play, and flurry rushes can feel a little off. Frames depend on your PC (the
+  emulated CPU is the usual limit). In Eden keep "Fast CPU time" off: it makes the game run fast.
 - The Expansion Pass is on by default (include_dlc): the Guardian of Remembrance missions are story missions, EX
   challenges and quests hold checks, and Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts
   stay playable but never hold checks (except Forgotten Temple). Without the DLC in your emulator, the client
@@ -143,8 +155,8 @@ KNOWN LIMITATIONS
 REPORTING PROBLEMS
 ------------------
 
-First see TROUBLESHOOTING.md (the usual fixes: close the game before switching seeds, pause and go back
-to the map once on a new seed, /todo for what the goal needs).
+First see TROUBLESHOOTING.md (the usual fixes: close the game before switching seeds, start the client
+before the emulator so it can install the game mod, /todo for what the goal needs).
 
 Open an issue: https://github.com/DrPuffball/aoc-archipelago/issues with: what happened and what you expected, your YAML, the client log (Archipelago's
 logs folder, newest Launcher_*.txt).

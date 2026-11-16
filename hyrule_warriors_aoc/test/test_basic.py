@@ -194,6 +194,10 @@ class TestChampionStartersFreeParty(AoCTestBase):
                "side_content": []}
 
     def test_calamity_strikes_needs_a_hero_it_lets_you_pick(self) -> None:
+        if "Calamity Strikes" in self.world.starting_unlocks:  # open from the start: a starter was added instead
+            self.skipTest("Calamity Strikes is a starting unlock in this seed")
+        if any(c not in ("Mipha", "Daruk", "Revali", "Urbosa") for c in self.world.starting_characters):
+            self.skipTest("another opening mission added a starter Calamity Strikes lets you pick")
         self.assertIn("Calamity Strikes", self.world.party_needs)
         self.assertNotIn("Mipha", self.world.party_needs["Calamity Strikes"])
         self.assertTrue(self.world.characters_matter)

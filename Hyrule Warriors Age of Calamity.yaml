@@ -57,6 +57,8 @@ Hyrule Warriors Age of Calamity:
 
   # --- Locked features ---
   weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
+  frame_rate: fps_30                   # fps_30 (the game's own) | experimental: fps_60 | fps_120 | unlimited (game speed stays real time) | off
+  sheikah_runes: shuffled              # shuffled (all four runes are items; uses the game mod) | start_with_all | vanilla
   locked_features: [Terrako Guardian, Fairy Fountains]  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian
 
   # --- Upgrade items ---
