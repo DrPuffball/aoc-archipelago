@@ -28,6 +28,12 @@ def _reward_items() -> set[str]:
     return set(REWARD_BY_ITEM) | set(INDIVIDUAL_BY_ITEM) | set(DIRECT_BY_ITEM) | set(LAB_ITEMS)  # (Weapon Fusion and Progressive Seal Slot are in UPGRADE_NAMES)
 
 
+def _rods() -> list[str]:
+    """Item palette items the client can lock: the three rods and the apples."""
+    from ..data import PALETTE_ITEMS
+    return PALETTE_ITEMS
+
+
 CHARACTER_PREFIX = "Character: "
 WEAPON_PREFIX = "Weapon: "
 RUNE_PREFIX = "Rune: "
@@ -40,9 +46,16 @@ LOCATION_KINDS = {
     "challenge": "challenge_ids",
     "quest": "quest_ids",
     "korok": "korok_ids",
+    "chest": "chest_ids",  # 0.9.90: treasure chests in story missions
     "difficulty": "difficulty_ids",  # "<mission or challenge> (<difficulty>)"
     "lab": "lab_ids",  # 0.9.81: Royal Ancient Lab nodes
+    # 0.9.90 progress checks (data_progress; client/progress.py)
+    "hero_level": "hero_level_ids",
+    "weapon_level": "weapon_level_ids",
+    "gathered": "gathered_ids",
+    "defeated": "defeated_ids",
 }
+PROGRESS_KINDS = ("hero_level", "weapon_level", "gathered", "defeated")
 
 
 DIFFICULTY_LEVEL = {"Normal": 1, "Hard": 2, "Very Hard": 3}  # locations.DIFFICULTY_NAMES -> difficulty slot
@@ -117,6 +130,7 @@ class Session:
             kind: dict(slot_data.get(key, {})) for kind, key in LOCATION_KINDS.items()
         }
         self.mission_ids = self.ids["mission"]
+        self.gather_counts: dict[str, int] = dict(slot_data.get("gather_counts", {}))  # 0.9.90 location -> total
         self.weapon_ids = self.ids["weapon"]
         # slot (vanilla mission position) -> mission placed there; slot -> prerequisite slots
         self.mission_slots: dict[str, str] = dict(slot_data["mission_slots"])
@@ -183,6 +197,8 @@ class Session:
         self.final_mission: str = slot_data["final_mission"]
         # 0.9.54+: the seed may start on any mission; the client installs a starter save that skips the forced one
         self.starter_save = bool(slot_data.get("starter_save", False))
+        # 0.9.90 (always but Challenges Only): Hyrule Field is a normal mission (uncleared in the starter save, game mod needed)
+        self.hf_shuffled = bool(slot_data.get("hf_shuffled", False))
         self.first_mission: str = slot_data.get("first_mission", "The Battle of Hyrule Field")
         self.locked_features: list[str] = list(slot_data.get("locked_features", []))
         self.min_level = int(slot_data.get("minimum_character_level", 1))
@@ -202,6 +218,9 @@ class Session:
         self.runes_all = int(slot_data.get("sheikah_runes", 0)) == 2  # start_with_all
         self.runes: set[str] = set()
         self.rune_items: list[str] = list(slot_data.get("rune_items", []))  # 0.9.58+ (see rune_flags)
+        self.rod_items = bool(slot_data.get("rod_items", 0))  # 0.9.92: rods locked until their items arrive
+        self.apple_items = bool(slot_data.get("apple_items", 0))  # 0.9.92: apples locked until their item arrives
+        self.rods: set[str] = set()
         self.unlock_items = int(slot_data.get("mission_unlocks", 0)) == 1  # story missions open by unlock items
         self.mission_unlocks: set[str] = set()
         self.challenge_item_unlocks: set[str] = set(slot_data.get("challenge_item_unlocks", ()))  # 0.9.87
@@ -256,6 +275,10 @@ class Session:
             elif name.startswith(RUNE_PREFIX):
                 if name[len(RUNE_PREFIX):] not in self.runes:
                     self.runes.add(name[len(RUNE_PREFIX):])
+                    changed = True
+            elif name in _rods():
+                if name not in self.rods:
+                    self.rods.add(name)
                     changed = True
             elif name.startswith(UNLOCK_PREFIX):
                 if name[len(UNLOCK_PREFIX):] not in self.mission_unlocks:
@@ -353,6 +376,17 @@ class Session:
 
     def on_korok_found(self, korok: str) -> int | None:
         return self._report("korok", korok)
+
+    def on_chest_opened(self, chest: str) -> int | None:
+        return self._report("chest", chest)
+
+    def on_progress(self, kind: str, name: str) -> int | None:
+        """A hero/weapon level or gathering check reached (client/progress.py)."""
+        return self._report(kind, name) if kind in PROGRESS_KINDS else None
+
+    @property
+    def has_progress_checks(self) -> bool:
+        return any(self.ids[k] for k in PROGRESS_KINDS)
 
     # --- derived state -------------------------------------------------------------------
 
@@ -551,11 +585,12 @@ class Session:
         from ..data_save import QUEST_EFFECTS
         states = {q: 3 for q in self.open_quests}  # Weapon Fusion (below) overrides the Smithy when in the seed
         bought = self.done["quest"]
-        if self.side_random:  # open (available) by completion count, else held back unless already done
+        side_quests = self.game_mode != 1  # (Story Only: Korok/chest checks alone must not open map quests)
+        if side_quests and self.side_random:  # open (available) by completion count, else held back unless done
             done = self.completions
             states.update({q: 2 if done >= at else -1 for q, at in self.quest_open_at.items()
                            if q not in self.open_quests})
-        elif self.post_story_open:  # post-story quests opened early (available; groups below may still hold them)
+        elif side_quests and self.post_story_open:  # post-story quests opened early (groups below may still hold them)
             states.update({q: 2 for q in self.post_story_quests if q not in self.open_quests})
         # checks already collected: done (reward-group quests below keep following their items; Hope quests follow the
         # map %)
@@ -724,6 +759,15 @@ class Session:
             have = {"Remote Bombs": first, "Cryonis": first, "Magnesis": road, "Stasis": road}
         have["Sheikah Slate"] = any(have.values())
         return have
+
+    def rod_locks(self) -> list[bool] | None:
+        """Per item palette item (data.PALETTE_ITEMS: Fire, Ice, Lightning Rod, Apples): True while the client must
+        hold it at 0. None when the seed locks none of them (as in the normal game)."""
+        if not (self.rod_items or self.apple_items):
+            return None
+        from ..data import APPLES
+        return [item not in self.rods and (self.apple_items if item == APPLES else self.rod_items)
+                for item in _rods()]
 
     def hold_rune_mission(self) -> bool | None:
         """Rune lock: True while Road to the Ancient Lab's clear must be hidden from the game's rune check (Magnesis or
@@ -916,6 +960,13 @@ class Session:
         from ..data_save import DIFFICULTIES
         if self.goal_complete:
             return "Goal complete"
+        if self.final_goal and self._goal_counts_met(exclude_final=True):
+            # The Future of Hyrule is open: it is all that's left (user, 2026-11-19), then the 100% map if asked for
+            done = self.difficulty_cleared if self.goal_difficulty else self.cleared_missions
+            level = f" on {DIFFICULTIES[self.goal_difficulty - 1]} or harder" if self.goal_difficulty else ""
+            if self.final_mission not in done:
+                return f"Goal: clear {self.final_mission}{level}"
+            return "Goal: The Hope of All Hyrule (100% map)"
         parts = [] if self.game_mode == 2 else [
             f"Story {len(self.story_cleared())}/{min(self.goal_story_missions, len(self.story_names))}"]
         if self.goal_challenges:

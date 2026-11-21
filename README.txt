@@ -20,7 +20,7 @@ WHAT YOU NEED
 -------------
 
 - Computer: Windows (the client reads and writes the emulator's memory; Linux/macOS are not supported)
-- Emulator: Ryujinx (tested 1.3.3) or Eden (tested 0.2.1), set up with your own keys and firmware dumped from your
+- Emulator: Eden (tested 0.2.1; recommended, actively updated and faster) or Ryujinx (tested 1.3.3), set up with your own keys and firmware dumped from your
   own Switch. The client detects which one you use; open only one at a time. No emulator, keys, firmware or game
   files are provided or linked here.
 - Game: Your own legally dumped Hyrule Warriors: Age of Calamity (Switch, title ID 01002B00111A2000) updated to v1.4.1. The Expansion Pass (both waves) is used by default; without it, set include_dlc: false. This project contains no game files.
@@ -36,7 +36,8 @@ INSTALLATION (ONCE)
    and double-click it (or copy it into Archipelago's custom_worlds folder,
    usually C:\ProgramData\Archipelago\custom_worlds). Restart the Archipelago Launcher.
 3. Emulator setting. Ryujinx: Options > Settings > System > Memory Manager Mode: Software, then save (the client
-   can't read the game without it). Eden: leave CPU accuracy on Auto (the default).
+   can't read the game without it). Eden: CPU accuracy Unsafe (about 10% faster in battle) or Auto; not
+   Accurate or Paranoid.
 4. Make sure the game is updated to v1.4.1 in your emulator.
 5. Nothing to install in the emulator: the client puts the "AoC Archipelago" game mod into Eden and Ryujinx by
    itself whenever no emulator is running (start the client before the game) and keeps it up to date. Leave it on in
@@ -52,8 +53,12 @@ Hyrule Warriors Age of Calamity.yaml (change name:). Give the YAML to whoever ge
 this apworld installed too. The defaults are the tested setup; the options most people change:
 
 - starting_character_count: random heroes you start with (default 4).
-- challenge_checks / quest_checks / lab_checks / weapon_checks: what holds checks (default: challenges, quests and the
-  Royal Ancient Lab on, weapons off).
+- challenge_checks / quest_checks / lab_checks / weapon_checks / korok_checks / chest_checks: what holds checks
+  (default: challenges, quests, the Royal Ancient Lab, Korok seeds and treasure chests on, weapons off).
+- Progress checks (all off by default): hero_level_checks, weapon_level_checks (a check every few levels),
+  enemy_defeat_checks and material_checks (defeat or gather enough in total), with gathering_check_tiers and scales.
+- rod_items (on): the Fire, Ice and Lightning Rod are items; a rod's slot stays hidden until you find it.
+  apple_items (off): healing apples are an item too.
 - challenge_unlock_order / quest_unlock_order: randomized (default) or vanilla.
 - mission_unlocks: items (default) = each story mission opens with its own item from the multiworld (you start
   with 2); story_order = in order.
@@ -67,9 +72,10 @@ this apworld installed too. The defaults are the tested setup; the options most 
 - hint_mission_unlocks / hint_heroes: free hints; hero_level_cap: heroes stay at 99 (level-ups still refill you).
 - filler_weights: filler mix (default about 40% material bundles in three sizes).
 - sheikah_runes: shuffled (default; all four runes, Remote Bombs included, are items) | start_with_all | vanilla.
-- frame_rate (experimental): fps_30 (default, the game's own) | fps_60 | fps_120 | unlimited | off. Above 30 the game
-  stays at real speed however many frames your PC manages (battles only). Change it any time with /fps.
-- death_link: share deaths with the other players.
+- frame_rate (experimental): off (default, the game's own 30) | fps_60 | fps_120 | unlimited. Above 30 the game
+  stays at real speed however many frames your PC manages. Change it any time in the client's Options tab or with /fps.
+- death_link: share deaths with the other players. A received death defeats your hero at once (the game's normal
+  defeat menu, Restart Battle works).
 
 GENERATING AND HOSTING A ROOM (the host does this once per run)
 ---------------------------------------------------------------
@@ -89,11 +95,13 @@ PLAYING
 1. Keep the game closed. Archipelago Launcher > Age of Calamity Client > connect to the room (address, e.g.
    archipelago.gg:38281, and your slot name).
 2. For a new seed the client installs a starter save by itself ("Starter save installed"): the game's forced
-   opening (The Battle of Hyrule Field) comes pre-cleared, and you start on the world map with your random starting
-   heroes and the seed's opening missions. Your previous save is kept (see below).
+   opening is skipped, and you start on the world map with your random starting heroes and the seed's opening
+   missions. The Battle of Hyrule Field is shuffled into the story like any other mission (pre-cleared in
+   challenges_only). Your previous save is kept (see below).
 3. Start Age of Calamity in Ryujinx or Eden and pick Continue. The client finds the game by itself.
 4. Play normally. Notices appear in the emulator window: items sent and received, what a gift went to, and - when you
-   highlight a mission, challenge or quest on the world map - what its checks hold.
+   highlight a mission, challenge or quest on the world map - what its checks hold. When an item opens something, the
+   world map redraws by itself.
 
 Switching emulators: the client keeps a seed's save the same in Ryujinx and Eden. Start the game once in the other
 emulator, close it, and type /sync_saves; after that, whenever no game runs, the newest save is copied over the
@@ -104,8 +112,10 @@ room: the client swaps the saves (yours are kept in %USERPROFILE%\AoC_Archipelag
 save back. It never replaces a save while the game runs, nor a save with progress it can't place
 (/starter_save does that on purpose, keeping a copy).
 
-Client commands (optional): /todo (goal progress, what to play), /inventory, /check_hook, /deliver, /saves, /sync_saves, /ryujinx_folder,
-/starter_save, /goal_banner, /research, /fps (frame-rate mode), /accept_save. Full details: SETUP_GUIDE.md.
+The client window's Options tab has a button or switch for every command, grouped by what it's for (frame rate,
+display, your progress, saves, troubleshooting); hover one to see what it does. Typed commands work too: /todo (goal
+progress, what to play), /inventory, /gathered, /check_hook, /deliver, /saves, /sync_saves, /emulator_folder,
+/starter_save, /goal_banner, /deathlink (on/off any time), /research, /fps (frame-rate mode), /accept_save. Full details: SETUP_GUIDE.md.
 
 Save safety: if the first read after connecting shows many clears the server has never seen, or would finish your
 goal at once (another seed's save in the slot), the client holds them back. Type /accept_save only if the save really
@@ -114,10 +124,12 @@ is this seed's.
 HOW THE RANDOMIZER WORKS
 ------------------------
 
-- Checks: clearing story missions, challenges and quests (weapon pickups optional). When there are more items than
+- Checks: clearing story missions, challenges and quests, Korok seeds ("Korok Seed: <mission> #n") and treasure
+  chests ("Treasure Chest: <mission> #n"), sent the moment you pick them up (weapon pickups and progress checks
+  optional). When there are more items than
   checks, extra "bonus" checks are spread evenly over the missions you can play before the goal.
 - Items: heroes, per-hero upgrades (hearts, combo moves, special gauge, abilities), quest rewards, mission unlock
-  items, the four Sheikah Slate runes (with sheikah_runes: shuffled), and filler (hero XP gifts, weapon bundles, rupees, material bundles,
+  items, the four Sheikah Slate runes (with sheikah_runes: shuffled), the three rods (rod_items), and filler (hero XP gifts, weapon bundles, rupees, material bundles,
   meals). Most quest-reward items give their reward directly (recipes, Sheikah Sensor, rune and stat upgrades,
   discounts, Smithy upgrades, lessons, dyes, research, Expansion Pass abilities and royal gifts). Buying the quest only
   sends its check. Maz Koshia's trials are the exception: each trial is the next fight, so its item opens the quest.
@@ -136,12 +148,13 @@ HOW THE RANDOMIZER WORKS
 KNOWN LIMITATIONS
 -----------------
 
-- Windows only, game v1.4.1 only. Ryujinx needs Memory Manager Mode Software; Eden needs CPU accuracy Auto. Both are
+- Windows only, game v1.4.1 only. Ryujinx needs Memory Manager Mode Software; Eden needs CPU accuracy Unsafe or Auto. Both are
   tested in full play (Eden 0.2.1: a whole session of missions, quests, items, DLC and save switching).
-- Shuffled runes need the game mod (the client installs it). The Battle of Hyrule Field still comes pre-cleared.
-- Frame rates above 30 are experimental: cutscenes, menus and the world map stay at 30, the end of a mission can drop
-  to 30 while the last text boxes play, and flurry rushes can feel a little off. Frames depend on your PC (the
-  emulated CPU is the usual limit). In Eden keep "Fast CPU time" off: it makes the game run fast.
+- Shuffled runes, rods, instant DeathLink and the higher frame rates need the game mod (the client installs it).
+- Frame rates above 30 are experimental: cutscenes and the world map stay at 30, and the pause menu does
+  too unless you switch it on in the Options tab. Flurry rushes can feel a little off. Frames depend on your PC (the emulated
+  CPU is the usual limit). In Eden keep "Fast CPU time" off: it makes the game run fast.
+- A rod or apple found mid-mission shows in your item palette from the next mission on.
 - The Expansion Pass is on by default (include_dlc): the Guardian of Remembrance missions are story missions, EX
   challenges and quests hold checks, and Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts
   stay playable but never hold checks (except Forgotten Temple). Without the DLC in your emulator, the client

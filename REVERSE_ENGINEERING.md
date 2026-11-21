@@ -33,7 +33,7 @@ address in Ryujinx, `MODULE_BASE = 0x8504000`.
   (`WRITER_SIG`). [confirmed]
 
 ### Eden (tested on 0.2.1; yuzu family)
-- With "fastmem" on (the default; CPU accuracy Auto), guest address `g` lives at host `arena + g`. [confirmed]
+- With "fastmem" on (CPU accuracy Auto or Unsafe; Accurate/Paranoid turn it off), guest address `g` lives at host `arena + g`. [confirmed]
 - The arena start is **not** a memory-region boundary, so it can't be found directly. The module, however, starts
   exactly at a committed region. Reading `WRITER_SIG` at `region + 0x9ACF60` for each region finds it with one read
   per region. [confirmed]
@@ -91,7 +91,30 @@ XP per level and hearts per level come from the game's own table (LinkData2 `007
 - Mission flow: u32 at `[module + 0x2780A80] + 0xB0`, low byte 0 playing, 4 defeated, 12 defeat menu. A natural KO on
   Eden (2026-11-03): `00 04` playing, `04 04` at the hit, `0C 04` about 2 s later with the menu up, `0C 25` when Retry is
   picked, then `00 75`, `00 54` playing again. [confirmed]
-- DeathLink: real HP and display copy held at 0; the next hit is a real KO with the death animation and defeat menu,
+- DeathLink, instant (2026-11-19, Eden GDB stub, shipped in the game mod 0.9.91) [confirmed on Eden]:
+  - The flow "state" is a u64 bitfield at `F+0xB0` (F = `[main+0x2780A80]`; `[F]` points at `F+0xB0`), `+0xB8` is a
+    pending-set word and `+0xC0` a pending-clear word. The battle flow update (text 0x863120, once per frame on the
+    logic thread) does state = (state | pending) & ~clear, then zeroes both. Bit 2 = defeated, bit 3 = defeat menu,
+    bit 25 = hero KO'd, bit 40 = end the battle without the menu (restarts it).
+  - A real KO: the hit code (text 0x3FA20, `comp->vtbl[0x350](comp, damage, flag)` = per-class damage handler, the
+    hero's is text 0x19C400) calls addHP (0x6BE310, which calls setHP 0x6BE1A0, store at 0x6BE2FC) and returns "died";
+    then "unit defeated" text 0x6B41C0 (w0 victim unit index, w1 killer, x2 hit info, w3 0) sets pending bit 25 for a
+    party hero and queues the "hero defeated" event. The mission script answers the same frame with EndBattle (text
+    0x6D3A50, w0 = 1: pending bit 2; w0 = 0 also sets bit 40), and about 2 s later its command at text 0x6F57D4 sets
+    pending bit 3: the defeat menu (state 12). Restart Battle works.
+  - Calling 0x6B41C0(hero unit, same, 0, 0) on the logic thread does all of that with no hit (the hero has no death
+    animation; the screen goes to the defeat picture and menu). Setting bit 25 or the state bits from outside does not:
+    the script needs the event; bit 2 alone stays on a HUD-less field, bit 2 then bit 3 restarts the mission.
+  - Game mod: text 0x863120 branches to a hook (a chain of unused alignment gaps from text 0x1B40054, see "Code
+    caves") that calls 0x6B41C0(word - 1, word - 1, 0, 0) when the word at
+    `main+0x26A2298` (unused data) is set, and clears it. The client writes the hero's unit index + 1 (the unit record
+    `real HP - 0x44` starts with it) after setting the HP to 0.
+  - GDB stub notes: Eden randomizes the load address (tools/deathlink/find_base.py); watchpoints and breakpoints stop
+    before the instruction, so step that thread (`Hg`/`Hc` to the stop's thread, `s`) with the watch off, then `Hc-1`
+    before `c` or only that thread runs; never send `D` (the stub stops listening); hardware breakpoints (Z1) are
+    unsupported; a watch covers its 16-byte block. Tools: tools/deathlink/gdbrsp.py, ko_watch.py, call_func.py.
+- DeathLink before 0.9.91 (still the fallback without the hook): real HP and display copy held at 0; the next hit is a
+  real KO with the death animation and defeat menu,
   and Retry works. [confirmed on Eden, without the client's other writes running] Forcing requests at `+0xB8` (flag
   byte 2 at `+0xB3`) is taken next frame but has no animation or menu: 4 then 12 froze on the sepia picture on Eden
   in both a story and a challenge mission (state stays `0C 04`). Do not use it.
@@ -104,6 +127,69 @@ XP per level and hearts per level come from the game's own table (LinkData2 `007
   only came from a real hit. Byte 1 read 0x04 on first attempts and 0x54 after a restart. Forced 4 then 12 on an attempt
   already restarted: animation, sepia, restart in about 1 s (3 of 3); on a first attempt it freezes even with `+0xB1`,
   `+0xC9` = 0x54 and `+0x120` = 0 set first, so what is missing lies outside this object.
+
+### World-map refresh [confirmed on Eden, 2026-11-19]
+- The map draws its icons only when it is rebuilt; closing the pause menu does that. The map scene is
+  `[[[main+0x2780AA8]+0x48]+0x80]` (vtable at module offset 0x26CAF00, same object `[...+0x48]+0x4A8`), updated by
+  text 0xBDCF60 (x0 = scene, s0 = dt; jump table by current state). `+0x134` = current state, `+0x138` = requested;
+  when they differ, the entry code of the new state runs (switch at 0xBE1914, table rodata 0x1F000E4). States seen:
+  0 pause menu open, 1 rebuild (entry 0xBE1940: map object `[scene+0x58]` methods 0xBFAD70, 0xBFAF70, vtbl+0x198 =
+  0xDDFB80 which reads the mission states, 0xBFB070, 0xBFB240, 0xBFD9A0), then 2 3 4 5 7 9 11 12 13 and 14 = idle.
+  The map object's own state is `+0x88` (0 hidden, 1-2 opening, 8 idle).
+- State 9 walks the entry list `[[scene+0x58]+0x68]+0xA980` (20-byte entries); any entry with byte `+0xD` = 0 sends it
+  to 10, the "new icon" reveal, which waits for map object state 4/5. Missions opened in the two map lists only
+  (profile lists left at 1) or cleared/iconless missions (Hyrule Field) made the reveal wait forever (map 3), also
+  through a real menu close: no input until a restart. With all four lists written (as set_mission_states does) the
+  flow skips 10.
+- Client (live_hook.refresh_map): only at 14/14, request 0, wait for it to be taken, request 1: the same states as a
+  real menu close, new icons appear, the menu works afterwards. Requesting 1 straight from 14 left the scene in 10
+  with no input. Input is ignored for ~2 s while it runs. Found with read-watches on `[P+0x5A8]+0x14C` during a menu
+  close (readers 0xDE0F44 / 0xDE1094 from 0xBE196C) and the saved registers on the reader's stack.
+- Open tab: scene `+0x19C` (i32) = 3 Services, 4 Map, 5 Chapters, 7 Quests (6 likely Challenges); kept through the
+  pause menu [read live 2026-11-20]. The cursor kind at `[P+0x5A8]+0x14A` does NOT tell tabs apart (kind 1 on empty
+  map ground and in the Chapters list alike, kind 5 on a service). A redraw while the Chapters list is open closes
+  the list and jumps to the map, so the client redraws only on tab 4.
+- Seen through the real client on a local seed (2026-11-20): an unlock sent on the Map tab redrew within a tick; one
+  sent with the Chapters list open waited and redrew on returning to the Map tab; input normal afterwards.
+- Eden GDB stub: software breakpoints (Z0) never hit; reading guest stack memory via `m` failed (read it through the
+  process instead). A script that died with a watch set left the game halted with a half-closed menu (UI broken
+  until restart) - always clear watches in a finally.
+
+### World-map scroll speed [confirmed on Eden, 2026-11-19]
+- The world map scrolls under a fixed centre cursor. Text 0xce7254..0xce72b4 (the map update): new = old + stick
+  (ints at [x19+0xb4], [x19+0xb8]) * speed (float param at +0x1e0 of the map parameter table), once per drawn frame,
+  then 0xbf2790 clamps it and places the info panel; the result lands in [P+0x5A8]+0x120 / +0x128.
+- The game mod scales that speed by frame step / 2 (cave chain from 0x1B41A64), so the scroll follows real time.
+
+### Elemental rods [confirmed on Eden, 2026-11-19]
+- Item palette (hold L in a mission): Y Fire Rod, X Ice Rod, A Lightning Rod, B baked apple.
+- Uses left this mission: u32 per rod at `[B + 0x3C8] + 0x910` (Fire), `+0x914` (Ice), `+0x918` (Lightning), B = the
+  battle object `[[module + 0x2B63708] + 0x30]` (1.4.1). Same block: `+0x92C` 5, `+0x934` 2, `+0x938` 3, `+0x94C` 2
+  (apples and capacities, unmapped). Writing 0 greys the rod out (empty bar) and L + its button does nothing; the game
+  doesn't write it back on its own. Using the Ice Rod (L + X) enters aim mode ("X Bombard, B Cancel").
+- The save's start count per rod is table B `0x140 + rod` (story flag object `[P + 0x550] + 0x254`, saved copy
+  `+0x1754`, a mission's copy `+0x954`); 3 each in a save with one Rod Mastery upgrade (profile `+0x7A5` = 1). A
+  fresh game has 0 (no item palette until a rod is picked up).
+- Palette drawing (text 0xf5a6b8 loop over 5 slots): uses read from the battle object (rods +0x2bd0 + 4 * slot, apples
+  +0x2bec from `[[x23 + 0xa80] + 0x10]`); layout animations picked by id = index into the name table at data 0x2682030
+  (stay_carry_<btn>_on/off, out_guide_carry_<btn>, shot_carry_gaugeMinToMax_<btn>; a 30-33, b 34-37, x 38-41,
+  y 42-45). A greyed slot = its stay_carry_*_off anim at its end frame and the gauge anim at 20. Anim object: +0x28
+  flags, +0x2c frame, +0x34/+0x38 start/end, +0x3c speed. No per-slot hide found yet.
+- Rod OBTAINED flags (save 0x52F Fire, 0x530 Ice, 0x531 Lightning): live at [P+0x550] + 0x121 + rod, saved copy
+  +0x1621. The palette is built when a mission loads: a rod with flag 0 has no slot at all (not even greyed); with
+  all three 0 and no apples there is no palette. Changing them mid-mission does nothing until the next load
+  [confirmed on Eden 2026-11-19]. How found: the in-memory save image ([P+0x5F0], save offset = image offset) is
+  rebuilt at every mission start by a serializer (text 0x9edb44.., object [P+0x550]+0x1620 -> image); a write-watch
+  on the image bytes gave the source fields. Table B (start counts) is the same object's +0x254 / +0x1754. Apple slot
+  flag: not 0x535 or 0x53D (tried, slot stayed hidden); unknown.
+- Apples (from the code, 2026-11-19): the same structure S = [P+0x550]+0x120 is saved (writer text 0x9edb44..)
+  as S+0..6 -> save 0x52E..0x534, S+0x522 -> 0x535 (apples carried), S+0x524..0x52A -> 0x536..0x53C (per kind;
+  plain = +0x526), S+0x631 -> 0x53D (apples obtained; zeroed for older save versions). Mission start (0x6e375c) loads
+  the count from S+0x522 into the battle object (+0x2bec, per kind +0x2bf0..). The palette check (0xd868bc) shows the
+  palette only if S+1..3 (rods) or S+0x631 is set. Live: [P+0x550]+0x751 (saved +0x1C51). Fresh save: 0; saves with
+  apples: 1. Confirmed in game 2026-11-19 (Revali mission, flag set on the world map before entering): 0 = no B slot, 1 = apple on B. The apple uses counter (+0x1C) still loads even when the slot is hidden, so the client also holds it at 0.
+- The client's rod lock (rod_items, 0.9.92) holds a locked rod's counter at 0 every tick in missions and gives the
+  held uses back when the item arrives mid-mission (live_hook.hold_rods).
 
 ### Game data tables in memory
 `[[module + 0x2780A38] + field] + 0x60`: `0x698` mission parameters (400 rows), `0x308` mission unlock table
@@ -122,6 +208,44 @@ quests needed). The client rewrites rows of these tables to change unlock order.
   [confirmed; partly from a public save editor]
 - The client edits the file only while no emulator runs the game. A starter save (the first mission pre-cleared)
   lets a seed skip the forced opening.
+- Korok seeds [confirmed on Eden, 2026-11-18]: one byte per seed (1 = found) at `0x8DD + 20*r + slot`, r = story
+  mission in story order (0 = The Battle of Hyrule Field ... 19 = The Future of Hyrule, not record numbers). Live:
+  `[P+0x560] + 0x5B2` (last-saved copy `+0x2B02`). Each mission's used slots are the ones a 100% save has set
+  (`data_koroks.KOROK_SLOTS`; per-mission totals match the guides exactly). Block 20 holds the 12 challenge seeds:
+  0 Innkeeper's Request, 1 Mipha's Training, 2 Anti-Ice Training: II, 3 Defend Zora's Domain, 4-5 Elemental Uproar,
+  6 Polishing His Technique, 7 Winged Escort, 8 Cross the Hebra Mountains, 9 Hunting Partners, 10 Hair-Width Trial:
+  Expert+, 11 Defend Hyrule Castle [confirmed in game]. The Expansion Pass story missions show no Korok icons (no
+  seeds). Bytes `0x865..0x882` (10 set in the 100% save, also in saves without DLC progress) are something else. The
+  Korok Seed material only rises at the mission's end, but the live flag is set at pickup [confirmed in a real seed
+  2026-11-18: Hyrule Field seeds sent one by one mid-mission].
+- Mapping method [2026-11-18]: with A Most Peculiar Korok's byte (profile `+0xC7C`) and the Treasure Detector's
+  (`+0xC7D/+0xC7E`) set, the Chapters and Challenges lists draw a row of chest and Korok icons per mission, lit when the
+  flag is set (story/EX missions only once cleared). Writing flags in binary patterns and reading the icons from
+  screenshots (tools: scratch `walk.py`, `exwalk.py`) maps every slot without playing. Missions opened by memory only
+  get a list panel after the map rebuilds (title screen, Continue).
+- Treasure chests [confirmed on Eden, 2026-11-18]: one byte per chest at `0x2CB4B + 10*r + slot`, same mission
+  order; live `[P+0x588] + 0x3260` (saved copy `+0x4070`), set the instant the chest opens. Counts match the Zelda
+  Dungeon wiki (Hyrule Field 5, Akkala Tower 7, ...; 153 in the story). Blocks 20-23 are the Expansion Pass stages
+  30-33 (mission parameter table `t009cc294` `+59` = stage id): 20 EX To Zelda's Side / EX Guardian of Remembrance
+  (shared stage; slots 0-3, 5, 6 shown, slot 4 no icon), 21 EX Battle of Goponga Village (5), 22 EX Battle for
+  Kakariko Village (8), 23 EX The Princess and the King (9) [confirmed in game]. EX missions on story stages (Searching
+  Hyrule Forest 11, Liberate the Ancient Lab 2, The Yiga Clan's Retreat 12) share that story mission's chests.
+  Found by diffing the save from the mission's start (the game saves there) with the one after it.
+- Mission records, beyond the clear times [save, 2026-11-19]: per difficulty slot the 0x84-byte record also holds
+  a second u32 (HF 0x12C on two slots), a third (0xC8 = 200, rank/score?), `+0x48..+0x50` three u32 0x10001-like
+  values, and from `+0x58` / `+0x70` per-slot values such as 0x2EA / 0x179 on Hyrule Field (a best KO count, guess).
+  No outpost/camp capture count anywhere in the save [checked: test save vs 100% save].
+- Material totals: the game keeps only the current count (u16, profile `+0x3E4` live / save `0x2C14E`), lowered by
+  spending. Trophies are earned per defeat (Bokoblin Trophy 1727, Lizalfos 727 after ~5 story missions on the test
+  save; Keese 18, Octorok 16, Chuchu 9, Wizzrobe 11, Lynel 3, Guardian 21, Moblin 21; Pebblit/Hinox/Talus/Molduga 0).
+- Story clear rewards [LinkData2 009cba94]: the second list (`+0x10` counts, `+0x32` ids) is 10 each of five
+  everyday materials per mission; the first list (`+0x04`/`+0x24`) holds the gems and other first-clear rewards.
+- Weapon levels: record byte `+0x78` = level - 1; weapon kind u16 `+0x10` (0 = empty slot); first pool used.
+- Runes for Koroks and chests [guides, 2026-11-18; not checked in game]: Nintendo Life's Korok list names Stasis
+  (floating targets) and bombs (rock piles, cracked walls, a tree) in 11 story missions and Defend Hyrule Castle; its
+  numbers are the writer's find order, not the save slots. Some chests are half-buried (Magnesis pulls them out);
+  Remote Bombs open a chest behind rocks in Revali (Game8) and one behind a cracked wall in Calamity Strikes. Logic
+  table: data_koroks.KOROK_RUNES, data_chests.CHEST_RUNES(_ALL).
 
 ---
 
@@ -222,10 +346,122 @@ cutscene and gives Road to the Ancient Lab its first-time intro text).
   (it animates per drawn frame, not by the step) get the vanilla block and present interval 2.
 - The game rewrites the block itself (menus, loads), so the client compares with memory every frame rather than with
   what it last wrote.
-- Open: flurry rushes act oddly above 30 (the game writes its own frame-rate request,
-  `[[main+0x2780A70]]+0x1D58` = interval << 4 | countdown); the last ~10 s of a mission (clock stopped, player still
-  in control) fall back to 30; the world map's per-frame code; computing the frame step inside the game (an injected
-  code module) so it works without the client.
+- Video cutscenes [dump + rodata strings, 2026-11-18]: pre-rendered cutscenes are WebM files in RomFS `movie/`
+  (Movie001-093.webm, Stage_Intro_S%03d.webm), `movie_logo/`, DLC `movie_dlc2/`; played with nn::movie (Extractor,
+  Decoder, Buffer symbols in rodata). Name formats in rodata: `/movie/Movie%03d.webm`, `/movie/Stage_Intro_S%03d.webm`,
+  `/movie_dlc2/Movie%03d.webm`, `/movie_logo/Movie%03d.webm`. Other cutscenes are in-engine. Goal (user): the chosen
+  FPS everywhere but these videos; next: the code that formats those names -> a "movie playing" state to detect.
+- Frozen-clock moments [measured on Eden 2026-11-18, recorder fpsrec.py + user]: a Divine Beast's Y attack and
+  special attack stop the mission clock for ~4 s (the game's request word `[[main+0x2780A70]]+0x1D58` stays 0), so the
+  pacer took them for cutscenes and dropped to 30. With /fps_cutscenes on, the step ledger paces them: 64-88 FPS and
+  the user saw the attacks at normal speed [confirmed in game] - those animations follow the steps, not drawn frames.
+  Minimap pings blink fast above 30 (per-drawn-frame, like parts of the world map).
+- Pacer handle after a reload: "game state manager not set up" (mission start) left the pacer's own LiveGame reading
+  frozen values (no error), so it stayed at 30 for the rest of the session. Fixed: Pacer.reattach() when the client's
+  hook reconnects.
+- UI animation timing [static + live, 2026-11-18]: above 30 FPS the pause menu and the minimap pings ran fast even
+  with game time frozen; a held 60 FPS with 1 or 2 steps per frame ran equally fast (user), so the UI ignores steps.
+  The UI is Koei's "kids" screen layouts (script names kids::placeable::screenlayout::PlayAnimationLoop/OneTime/
+  IsAnimationFrameEnd, registered at text 0x927380.. -> functions 0x16471b0 / 0x1646f10 / 0x1647450). Animation
+  player object: +0x28 flags (bit 0/1 playing, bit 2 hold), +0x2C current frame (float), +0x30 hold value, +0x34/+0x38
+  start/end frame, +0x3C speed. The only per-frame advance is text 0x18cd7c0: frames = dt / (1/60) (rodata
+  0x1EF90F8), frame += speed * frames for each player in obj+0x270 (count obj+0x260). dt comes in s0 from its callers
+  (0x11642d8, 0x115f968, 0x1165188 via vtables; 0xa660c0 from obj+0x58) and is 1/30 per drawn frame at any rate.
+  Game mod (0.9.90): 0x18cd7fc/0x18cd800 load the divisor from main+0x26A2294 (no other reader; init 1/60); the client
+  writes 1 / (30 * frame step) there with every frame step (live_hook.set_frame_step). In the pause menu the gameplay
+  frame counter (main+0x277DBA8) stops; the "AllRender" profiling counter main+0x27843F0 keeps counting drawn frames
+  (siblings 0x27842E0 RenderGraphGPU, 0x2784368 RenderGraphCPU, 0x2784478 TaskGraphCPU, 0x2784500 RenderGraphGPU
+  CommandNum; objects 0x88 apart from 0x27842C0, name pointer at +0x78), so the pacer measures frame length there.
+  Found with tools/selftest/ratescan.py (values whose rate doubles at 60 with game time frozen) and xref.py.
+  In game (2026-11-18): scaling made most layout animations HALF speed at 60 (their dt already follows the frame
+  time); the client keeps the slot at 1/60 (vanilla). The UI parts still fast above 30 (minimap pings, cursor, 118
+  values in the world-map scan) use other code paths [open].
+- UI timing resolved [stub read-watch + write-watch on Eden, 2026-11-19]: with the client's pacer the layout dt is
+  already real time - a read-watch on the divisor slot (main+0x26A2294) at a held 60 FPS saw every call from 0xa6624c
+  (callers 0x8a0e80..0x8a0ec0) with s0 = 1/60, in play and in the pause menu (dt = frame step / 60). So the divisor
+  stays 1/60 everywhere (the client no longer scales it; scaling halved the hero-portrait arrow). The early "pause
+  menu fast" result came from holds that left the float step at 2.0.
+- Minimap objective ping [write-watch 2026-11-19]: the ping's animation frame is set at 0xf6cb8c from an int counter
+  / period at [[main+0x2780aa8]+0x1b4] / +0x1b8 (60); the minimap update adds a constant 2 per drawn frame at
+  0xf89f04 (`add w8, w8, #2`). Game mod: that add goes through a cave (0x1B42894) adding the frame's integer steps
+  (main+0x26A2284) instead. Found by: heap signature search for the 0..60 float, write-watch (writer 0x18d31e4, a
+  layout property setter fed by 0x18d2550 <- 0x18ce830 <- 0xf6cbe0), then the counter. Guest module base differs
+  from the client's MODULE_BASE view (stub saw 0x80635000 this boot): match pc/lr page offsets against text.bin.
+- Forced opening / The Battle of Hyrule Field as a normal mission [static + confirmed on Eden 2026-11-19]:
+  - The game plays the New Game opening when Hyrule Field's mission state (record 1: profile +0x877, also read as
+    [save]+0x757 off the summary base) is not 3. Two predicates answer "Hyrule Field not cleared" (text 0xA405F0 with
+    w0 == 1, and 0xA40860; both end `orr w0, w9, w8; ret` at 0xA406D0 / 0xA40930), called from the title/boot flow
+    (0xC5C428, 0xC5C74C, 0xC5C7B4, 0xC5DCB0, 0xC5DFF0, 0xC5FB88, 0xB757D4, 0xF8A8C0; 0x88389C.. for the second). At
+    0xC5D444 the start sequence is picked: state 2 -> 0x18 (the opening), else 1 (Continue to the map).
+  - Game mod (0.9.90): both `orr` -> `mov w0, wzr` and 0xC5D458 `b.ne` -> `b`. With Hyrule Field at state 2 the title
+    menu shows Continue, which loads the world map; patching only the six title calls or only 0xC5D458 still went to
+    the New Game settings screen.
+  - The mission itself needs a clear time in some difficulty slot: with all six slots 0 it hangs on its loading
+    screen when started from the map - also in the vanilla game (state 3, no patch). With a time in slot 5 (no
+    difficulty uses it) it loads; at state 2 it plays its first-play version (the full opening, then the battle as
+    Link Lv.1), at state 3 the replay version (your party, "COMPLETE" on its panel).
+  - Map display lists ([P+0x5A8]+0x14C/+0x81C) at 0 and its unlock row requiring The Future of Hyrule did not hide a
+    state-3 Hyrule Field from Chapters; profile state 1 (locked) in the starter save does, and the client's
+    set_mission_states opens it (it shows after a menu round trip, like other live unlocks).
+  - LiveGame.save_ok required a cleared mission to identify Eden's memory layout: a fresh shuffled-Field save has none,
+    so it now requires the mission state lists to look sane with one mission open or cleared.
+- Cutscene kinds [measured on Eden 2026-11-19, tools/selftest/staterec.py + timedshots.py, Mipha's mission]:
+  - A mission's opening scene (Divine Beast battle intro): flow state word (flow+0xB0, u32) gains 0x08000000
+    (0x08200400 vs 0x00200400 in play; also the holder byte `[main+0x2780A70]+0x6EA` = 1); clock readable and 0,
+    gameplay frame counter running. Follows game time: 9.40 s / 279 frames at forced 30/2, 9.41 s / 540 frames at
+    forced 60/1 - fine above 30.
+  - Story cutscenes (in-engine, e.g. King Dorephan's audience): flow state 0x00000C00 (gameplay: 0x00000400 in that
+    mission), low byte 0 so the clock reads (0, stopped); the gameplay frame counter main+0x277DBA8 STOPS, the render
+    counter main+0x27843F0 keeps counting. They advance per drawn frame: timed screenshots after the same button press
+    at forced 60/1 were ~2x further along than at 30/2 (subtitles as markers). Not the integer steps, the float frame
+    step, the cap float or the block's fps fields (all were "right" at forced 60/1). Several u32 counters there add a
+    fixed 2 per drawn frame (57.6/s at 30, 115/s at 60). The client now gives these the game's own 30 (framerate.py:
+    frame counter stalled while the clock reads = story scene), also with /fps_cutscenes on [unit-tested; live check
+    pending].
+  - Divine Beast Y / special attacks: state unchanged (0x00200400), clock stops, frame counter runs: game time, fine.
+  - Pause menu: state low byte 0x60 (e.g. 0x00200460, 0x60042000 seen as bytes), clock unreadable.
+  - Loading / story text screens: state 0x00000C00 / 0x00000D00 with the block at 60,2,34 written by the game.
+- World-map scroll speed MEASURED [2026-11-19, tools/selftest/scrollshot.py: screenshots + phase correlation, forced
+  block 30/2/2.0 vs 60/1/1.0, client closed]: holding the stick scrolls linearly, ~510 screenshot px/s at 30 (0.4 s
+  -> 203 px, 0.8 s -> 407 px; ~17 px per drawn frame) and twice as far at 60 (0.6 s: 305 vs ~593 px). So the map
+  scroll advances a fixed amount per drawn frame: it uses neither the step count, the mod's float frame step nor the
+  cap float (all were "right" at forced 60). A short tap moves a fixed nudge (+40.3 in one copy at both rates).
+  Finding its code: the scroll moves hundreds of per-icon screen positions (deltas of 103.5, 41.6, 20.8 ... per push
+  in different units, tools/selftest/scrollmaster.py); no lone master value identified yet, and writes to copies are
+  kept (recomputed only on input). Next idea: the stick read - floats +-1.0 in an input history block (0x2290213000..,
+  entries 0xE00 apart, no pointers to it found) - and the code that turns it into map movement.
+- World-map scroll [2026-11-19, tools/selftest/cursorhunt.py]: the cursor stays centred and the map scrolls under it
+  (it moves the cursor only at the map's edges); ~683 float copies of the scroll offset (screen px, e.g. -1987.8 ->
+  -2365.8 for a 0.25 s push) live in the map layout's per-icon data; a write to one copy is kept (they only recompute
+  on input), so the source wasn't isolated by writes. Stick values appear as floats +-1.0 in a block near
+  0x2290213000 with no pointers to it (input history buffer). Open.
+- Eden's GDB stub (use_gdbstub, port 6543): attaches and continues, but the connection drops after a while and the
+  game is left halted (stuck at "Launching", or a freeze mid-play). Not usable for watchpoints; config restored.
+- The game's own frame-rate request [static, 2026-11-19]: `[[main+0x2780A70]]+0x1D58` = interval << 4 | countdown.
+  Text 0xfc3c50 counts the low 4 bits down once per frame; at 0, and in the battle setup at 0x8a3590, the block
+  becomes fps = 60 / interval, steps = interval, fps, cap = 60 / interval (so interval 2 = the vanilla 30/2, 1 = 60/1).
+  It changes the frame rate only, never the game speed. The client rewrites the block every frame anyway.
+- Open: flurry rushes act oddly above 30 (the stall was seen with Link only; Sidon's at unlimited was normal). No
+  recording yet: the 2026-11-18 slowmo_rec.log has no request at all. Needs a flurry rush done by hand while
+  tools/selftest/slowmo_rec.py records.
+- The world map has a battle clock and gameplay frame counter of its own (both run at 60/s there). Until 2026-11-19
+  the pacer only checked "in a mission" when fps_map or fps_cutscenes was on, so with defaults it paced the map too
+  (block 60/1 on the map); it now always checks, and fps_map off keeps the game's own 30.
+- A mission's last ~10 s after the win (clock stopped, player still in control), Divine Beast and special attacks:
+  the clock stops but the gameplay frame counter keeps counting, and they follow game time, so the pacer paces them by
+  its step ledger by default (2026-11-19; before, only with fps_cutscenes on). Story cutscenes stop the frame counter
+  too and keep the game's own 30 (they advance per drawn frame). REVERTED 2026-11-21: in-engine story cutscenes in
+  the user's test run ran at double speed above 30 - some keep the frame counter running, so they look like this case;
+  clock stopped + frames counted now always gets the game's own 30 (attacks and mission ends included).
+- The pause menu with fps_cutscenes on: the menu is cheap to draw, so above 60 its loop spun far faster than frames
+  were shown (unlimited: ~363 updates/s, 60 shown, 2026-11-19) and whole-step animations (the pause map's ping) ran
+  ~6x. The pacer caps the pause menu at 60 (block 60/1, present 1): ping 59 units/s there, vanilla 60.
+- World-map zoom (right stick, [P+0x5A8]+0x130, 0.45..1.0): same speed at 30 and at 60 with step 1.0 (traced
+  2026-11-19) - it already follows the frame step.
+- In-engine story cutscenes: kids timelines ("kids::timeline::*", "mud::from_kidshost::UpdateTimelineList" in
+  rodata); the per-frame advance is not found yet (needs a replayable cutscene to watch).
+- The remaining frame-rate item: computing the frame step inside the game (an injected code module) so it works
+  without the client - deferred by the user until the FPS bugs are done.
 
 ### One-shot flags: never force them
 `[0x5A0]+0x65B` is the "Contributions to Hyrule" tutorial-seen flag [confirmed: forcing it to 0 replays the tutorial, and unrelated hand-ins set it]. `+0x65C` is also set by unrelated hand-ins, and `+0x651` sits beside them [guess: same kind]. The client leaves all three alone.
@@ -337,3 +573,49 @@ folder and are not published yet (they expect local game dumps); they are listed
 
 The chronological lab notebook with every session's raw findings is kept privately (`tools/RESEARCH.md`, not
 published, since it holds local paths). This file is its curated summary.
+
+### Code caves and Ryujinx [confirmed on Ryujinx 1.3.3 and Eden, 2026-11-20]
+- The main NSO's text segment ends at 0x1B55930; rodata starts at 0x1B56000. Ryujinx copies only the segment's real
+  length into memory (an IPS record past it is logged as applied but never lands), so the page padding after the text
+  reads as zeros there. Eden maps the whole page as patched. The 0.9.91/0.9.92 mod kept its caves in that padding:
+  on Ryujinx the first one run (the minimap ping, already on the title screen) executed zeros and the emulator died
+  (log: guest PC = text 0x1B559E0, LR 0xF89CF8; memory read 00.. from 0x1B55930 while the branch at 0xF89F04 was
+  patched). Instant DeathLink and the world-map scroll cave would have crashed the same way.
+- The text segment has no free run of zeros or NOPs; the large blocks with no visible reference are switch cases,
+  and the two real unreferenced functions are the exported nninitStartup and nnMain. What it does have is ~15900
+  three-word alignment gaps (zeros after a ret / b / br, before the next 16-byte aligned function). The caves now
+  live there: two instructions per gap, a branch to the next gap (tools/selftest/make_rune_patch.py `chain`, gaps
+  from 0x1B40000 not targeted by any branch or ADR). Chains: DeathLink 0x1B40054.., map scroll 0x1B41A64.., ping
+  0x1B42894... The client recognises the DeathLink hook by its branch word (rune_mod.DEATHLINK_HOOK_CODE).
+- Seen working on Ryujinx after the move: boots to the map, map scene / tab / redraw, frame pacing (25 FPS there,
+  real speed 60 ticks/s, pings 59-60), instant DeathLink (defeat menu).
+
+### Performance: where the frame time goes [Eden, Revali's mission, unlimited FPS, 2026-11-20]
+- Eden tops out at ~46-50 FPS in missions on the dev PC whatever the GPU settings (4x/0.75x, Accurate/Normal),
+  Ryujinx ~25: the emulated CPU is the wall. No host thread is pinned at 100% (three at 70-84%): the frame is a
+  chain across threads. Handheld mode (F10) gives only ~8% (47 -> 51).
+- Sampling profiler (scratchpad eden_profile.py: GDB stub, halt every 60 ms, each thread's pc + frame-pointer chain,
+  250 samples): one thread does nearly all the game-code work - the RENDER thread, per-draw material/shader-constant
+  setup. Hot chain: 0x12A7BB0 (render pass per mesh; strings RefractionPrePass, SSSTransmit, Refraction, IndexedRim,
+  LightMap) -> 0x12B0BB0 (sets ~100 named shader parameters: vTsbViewPort, nAttCurvType, nIESIndex, vTessFactors,
+  fHeightScale, PatternMap ...) -> 0x12B20E0 (SoftBody, IndexedRamp; 17% self) -> 0x17DF330 / 0x17E0A50 /
+  0x19DA1A0 / 0x1228CF0 (command writing). 0x12ABC30 = GBuffer / RenderStateControl / PB2GRASS2 materials. The cost
+  scales with draw calls (meshes x passes), not resolution.
+- Docked/handheld: nn::oe::GetOperationMode (PLT 0x1B54720, called at 0x8CF0FC/0x8CF260) -> byte main+0x278377F
+  (1 docked); GetPerformanceMode -> main+0x278377E (1 boost). Readers: 0x8C3528, 0x8C373C, 0xB0E784, 0xB0E888 (77F);
+  0x1A5710, 0xA8DD4C, 0xAE8248 (cached in obj+0x45C, re-applied on change), 0xB07344, 0xB073CC (77E). Data diff
+  docked vs handheld: only render height main+0x2780B78 (810 docked = 1440x810, 540 handheld), the mode bytes
+  0x278377C..F, and two indices at main+0x275A344/0x275A350 (13->17, 14->18).
+- Render preset table: 0xB071A8 picks index (byte 77E ? 1 : 3) + (byte 77D == 0) from
+  [[[main+0x2780A38]+0x10][0x12F]]+0x30 (0x40-byte entries, 10 slots, 5 used): +0..+0x24 ten scale floats, +0x28..+0x38
+  five uint distances (preset 1 docked: 50000 50000 5000 10000 1000000; 3 handheld: 8000 25000 3000 6000 30000;
+  4: 5000 25000 2000 4000 5000), +0x3C detail byte (140/80), +0x3D flag bits. Writing it live in a mission changed
+  nothing measurable (A/B x5: 56.5 vs 55.8): read at load, or not on the render thread's path. Next: write it before
+  a mission loads; attribute render time per pass (shadow, refraction pre-pass, SSS ...) to find one to skip.
+- Interpolation (logic at a lower rate, extra drawn frames) would not raise the frame rate: of the busy thread's
+  game-code samples 112/132 are rendering, and every other thread together ran game code in ~60 of 250 samples
+  (logic is cheap). Each drawn frame costs a full render-thread pass whatever the logic rate.
+- Eden settings benchmark (scratchpad bench_eden.py: fixed 25 s of mission game time at unlimited, baseline 46.3-46.6
+  over four runs): CPU accuracy Unsafe 51.4-52.4 (+11%, game speed exact, client fine); reactive flushing off, async
+  presentation, skip CPU inner invalidation, fast CPU time 1/2, GPU accuracy Normal: no gain (+-1). Recommended in
+  the docs: Eden with CPU accuracy Unsafe.

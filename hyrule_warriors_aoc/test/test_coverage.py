@@ -13,6 +13,9 @@ from ..items import ITEM_NAME_TO_ID
 from ..locations import LOCATION_NAME_TO_ID
 
 
+from ..data import PALETTE_ITEMS  # (rods and apples: session.rods, 0.9.92)
+
+
 class CoverageTests(unittest.TestCase):
     def test_every_story_mission_and_challenge_has_a_record(self) -> None:
         self.assertEqual([m.name for m in MISSIONS if m.name not in MISSION_RECORD_IDS], [])
@@ -37,7 +40,7 @@ class CoverageTests(unittest.TestCase):
         rewards = _reward_items()
         prefixes = ("Character: ", "Weapon: ", "Rune: ", "Unlock: ", "Feature: ")
         unknown = [n for n in ITEM_NAME_TO_ID if not n.startswith(prefixes) and n not in FILLER_ITEMS and n not in rewards
-                   and n not in UPGRADE_NAMES and n.partition(": ")[0] not in UPGRADE_NAMES]
+                   and n not in UPGRADE_NAMES and n.partition(": ")[0] not in UPGRADE_NAMES and n not in PALETTE_ITEMS]
         self.assertEqual(unknown, [])
         self.assertEqual([n for n in FILLER_ITEMS if n not in CONSUMABLES], [])
         self.assertTrue(set(LAB_ITEMS) <= rewards)

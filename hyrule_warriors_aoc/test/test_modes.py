@@ -20,7 +20,7 @@ class StoryOnlyTests(WorldTestBase):
         self.assertFalse([n for n in names if n.startswith(("Quest: ", "Obtain: "))])
         self.assertFalse([n for n in names if n.startswith("Challenge: ") and n[11:].partition(" (Bonus")[0] not in DLC_STORY_MISSIONS])
         self.assertEqual(len(w.story_chain), len(MISSIONS) + len(DLC_STORY_MISSIONS))
-        self.assertEqual(w.story_chain[0], MISSIONS[0].name)
+        self.assertEqual(w.story_chain[0], w.mission_order[0])  # first_mission's pick (Hyrule Field is shuffled)
         self.assertEqual(w.story_chain[len(w.story_chain) - 1 if w.options.goal_story_missions.value >= len(w.story_chain)
                                        else w.options.goal_story_missions.value - 1], "The Future of Hyrule")
         self.assertTrue(w.options.open_shops and w.options.open_stables and not w.options.weapon_fusion)
@@ -63,6 +63,7 @@ class StoryOnlyTests(WorldTestBase):
     def test_client_follows_the_chain(self) -> None:
         session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
         chain = self.world.story_chain
+        session.unlocked_characters |= set(self.world.characters)  # (the next one may need a hero not yet received)
         session.cleared_missions.add(chain[0])
         open_now = set(session.available_missions()) | {n for n in session.dlc_story if session.dlc_story_open(n)}
         self.assertEqual(open_now, {chain[1]})
@@ -453,7 +454,7 @@ class StoryOnlyUnlockItemsTests(WorldTestBase):
         session = Session(json.loads(json.dumps(w.fill_slot_data())))
         session.cleared_missions.add(MISSIONS[0].name)
         self.assertEqual(set(session.available_missions()) - set(w.starting_unlocks), set())
-        mission = next(m for m in locked if m not in ("Calamity Strikes",) and not w.party_needs.get(m)
+        mission = next(m for m in locked if m not in ("Calamity Strikes", MISSIONS[0].name) and not w.party_needs.get(m)
                        and not w.mission_party.get(m))
         self.assertNotIn(mission, session.available_missions())
         session.apply_received_item_names([unlock_item(mission)])

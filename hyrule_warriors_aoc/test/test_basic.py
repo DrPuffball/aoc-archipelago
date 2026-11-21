@@ -17,6 +17,10 @@ CLASSIC = {"mission_unlocks": "story_order", "goal_challenges": 0, "goal_story_m
 class AoCTestBase(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
 
+    def clears(self) -> int:
+        """Story missions whose clear holds a check (not a goal Future of Hyrule: its clear is the win)."""
+        return sum(self.world.clear_checked(m.name) for m in MISSIONS)
+
     def sweep(self) -> None:
         self.multiworld.state.sweep_for_advancements()
 
@@ -45,10 +49,10 @@ class TestDefaults(AoCTestBase):
     def test_story_needs_only_the_champions(self) -> None:
         # Any heroes can play the story missions; Calamity Strikes alone needs the four Champions.
         self.assertTrue(self.can_reach_location(f"Clear: {self.world.mission_order[0]}"))  # first_mission's pick
-        self.assertFalse(self.can_reach_location(f"Clear: {self.world.mission_order[-1]}"))
+        self.assertFalse(self.can_reach_location(f"Event: Cleared {self.world.mission_order[-1]}"))
         self.collect_champions()
         self.sweep()
-        self.assertTrue(self.can_reach_location("Clear: The Future of Hyrule"))
+        self.assertTrue(self.can_reach_location("Event: Cleared The Future of Hyrule"))
 
     def test_default_locations(self) -> None:
         names = self.location_names()
@@ -57,8 +61,9 @@ class TestDefaults(AoCTestBase):
         bonus = sum(getattr(self.world, "bonus_checks", {}).values())
         # (post-story challenges are mixed in by default, post_story_unlock 10; with 20 they'd hold no checks)
         self.assertFalse(self.world.post_goal_side)
-        self.assertEqual(len(names), len(MISSIONS) + len([c for c in CHALLENGES if not c.is_ex])
-                         + len(self.world.checked_quests) + bonus)
+        self.assertEqual(len(names), self.clears() + len([c for c in CHALLENGES if not c.is_ex])
+                         + len(self.world.checked_quests) + bonus
+                         + len(self.world.checked_koroks) + len(self.world.checked_chests))  # (0.9.90: on by default)
         self.assertIn("Quest: Hyrule Swordfighting Academy", names)
 
     def test_finishing_requires_every_mission(self) -> None:
@@ -96,7 +101,8 @@ class TestEverything(AoCTestBase):
         # no check: quests open from the start (Training Camp; the Smithy only without Weapon Fusion); no Koroks
         no_check = len(set(OPEN_SERVICE_QUESTS) - set(self.world.item_quests))
         from ..data_quests import UNUSED_QUESTS
-        expected = (len(MISSIONS) + len(self.world.checked_lab)
+        expected = (self.clears() + len(self.world.checked_lab)
+                    + len(self.world.checked_koroks) + len(self.world.checked_chests)
                     + len([w for w in WEAPONS if w.name not in BASIC_WEAPONS and f"Weapon: {w.name}" not in self.world.forced_items
                            ]) - len(self.world.post_goal_weapons)
                     + len(self.world.checked_challenges)  # (post-story ones: after the goal, no checks)
@@ -113,14 +119,15 @@ class TestStoryOnly(AoCTestBase):
     options = {"side_content": [], "lab_checks": False}
 
     def test_only_missions(self) -> None:
-        self.assertEqual(len(self.location_names()), len(MISSIONS))
+        self.assertEqual(len(self.location_names()), self.clears())
 
 
 class TestStoryOnlyToggles(AoCTestBase):
-    options = {"challenge_checks": False, "quest_checks": False, "lab_checks": False}
+    options = {"challenge_checks": False, "quest_checks": False, "lab_checks": False, "korok_checks": False,
+               "chest_checks": False}
 
     def test_only_missions(self) -> None:
-        self.assertEqual(len(self.location_names()), len(MISSIONS))
+        self.assertEqual(len(self.location_names()), self.clears())
         self.assertEqual(self.world.options.side_content.value, set())
 
 
@@ -128,7 +135,7 @@ class TestWeaponToggle(AoCTestBase):
     options = {"weapon_checks": True, "challenge_checks": False}
 
     def test_side_content_from_toggles(self) -> None:
-        self.assertEqual(self.world.options.side_content.value, {"Weapons", "Quests"})
+        self.assertEqual(self.world.options.side_content.value, {"Weapons", "Quests", "Korok Seeds", "Chests"})
 
 
 class TestShuffledOrder(AoCTestBase):
@@ -137,9 +144,8 @@ class TestShuffledOrder(AoCTestBase):
     def test_slots_cover_all_missions(self) -> None:
         self.assertEqual(sorted(self.world.slot_to_mission.values()), sorted(m.name for m in MISSIONS))
 
-    def test_first_mission_is_early(self) -> None:  # Hyrule Field, then first_mission random_early (default)
-        self.assertEqual(self.world.mission_order[0], "The Battle of Hyrule Field")
-        self.assertLessEqual(next(m.chapter for m in MISSIONS if m.name == self.world.mission_order[1]), 2)
+    def test_first_mission_is_early(self) -> None:  # first_mission random_early: slot 1 (Hyrule Field shuffled)
+        self.assertLessEqual(next(m.chapter for m in MISSIONS if m.name == self.world.mission_order[0]), 2)
 
 
 class TestVanillaFirstMission(AoCTestBase):
@@ -147,6 +153,35 @@ class TestVanillaFirstMission(AoCTestBase):
 
     def test_hyrule_field_stays_first(self) -> None:
         self.assertEqual(self.world.mission_order[0], "The Battle of Hyrule Field")
+
+
+class TestHyruleFieldShuffled(AoCTestBase):
+    """Hyrule Field shuffled (0.9.90, always but Challenges Only): a normal mission with real checks and (unless first) an unlock item."""
+    options = {"mission_unlocks": "items", "first_mission": "random_any", "korok_checks": True, "chest_checks": True}
+
+    def test_real_checks_and_unlock_item(self) -> None:
+        from ..items import unlock_item
+        hf = "The Battle of Hyrule Field"
+        self.assertTrue(self.world.hf_shuffled)
+        loc = self.world.get_location(f"Clear: {hf}")
+        self.assertFalse(loc.locked)
+        self.assertTrue(self.world.fill_slot_data()["hf_shuffled"])
+        if hf != self.world.mission_order[0] and hf not in self.world.starting_unlocks:
+            self.assertIn(unlock_item(hf), [i.name for i in self.multiworld.itempool])
+            from BaseClasses import CollectionState
+            state = CollectionState(self.multiworld)  # (events left out: they follow from the items)
+            self.collect_all_but([unlock_item(hf)] + [i.name for i in self.multiworld.get_items() if i.code is None], state)
+            state.sweep_for_advancements()
+            self.assertFalse(self.multiworld.get_location(f"Clear: {hf}", self.player).can_reach(state))
+            self.assertFalse(self.multiworld.get_location(f"Korok Seed: {hf} #1", self.player).can_reach(state))
+
+    def test_hf_can_be_the_first_mission(self) -> None:
+        firsts = set()
+        for seed in range(40):
+            self.world_setup(seed)
+            firsts.add(self.world.mission_order[0])
+        self.assertIn("The Battle of Hyrule Field", firsts)
+        self.assertGreater(len(firsts), 3)
 
 
 class TestSideGates(AoCTestBase):
@@ -277,6 +312,8 @@ class TestSteadyRewards(AoCTestBase):
             self.world_setup(seed)
             distribute_items_restrictive(self.multiworld)
             for name in self.world.mission_order[1:]:  # Hyrule Field: pre-cleared, holds a locked filler of yours
+                if not self.world.clear_checked(name):
+                    continue
                 item = self.multiworld.get_location(f"Clear: {name}", self.player).item
                 self.assertFalse(item.player == self.player and item.advancement is False and item.useful is False,
                                  f"seed {seed}: {name} holds filler {item.name}")
@@ -397,11 +434,10 @@ class TestBonusChecks(AoCTestBase):
         bonus = self.world.bonus_checks
         self.assertTrue(bonus)
         self.assertLessEqual(max(bonus.values()) - min(bonus.values()), 1)  # spread evenly
-        hf = self.world.get_location("Clear: The Battle of Hyrule Field")
-        self.assertTrue(hf.locked and hf.item.player == self.player and hf.item.filler)  # a locked filler of yours
+        self.assertFalse(self.world.get_location("Clear: The Battle of Hyrule Field").locked)  # (shuffled: a real check)
         # nothing beyond the starting heroes is handed out: every item has a check
         self.assertEqual(len(self.multiworld.precollected_items[self.player]), len(self.world.starting_characters))
-        self.assertNotIn(self.world.mission_order[0], bonus)  # Hyrule Field: pre-cleared, no checks behind it
+        self.assertIn(self.world.mission_order[0], bonus)  # (Hyrule Field shuffled: slot 1 is a real mission too)
         mission = self.world.mission_order[1]
         self.collect_all_but([])
         self.assertTrue(self.can_reach_location(bonus_location(mission, 1)))

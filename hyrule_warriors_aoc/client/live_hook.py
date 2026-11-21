@@ -22,6 +22,8 @@ import sys
 import time
 
 from .. import data_save as S
+from ..data_chests import CHEST_BLOCK, CHEST_BLOCKS, CHEST_FLAGS_LIVE, chest_flags
+from ..data_koroks import CHALLENGE_KOROK_BLOCK, KOROK_BLOCK, KOROK_FLAGS_LIVE, korok_flags
 from .ryujinx import MODULE_BASE, FastmemGuest, Guest, Process, emulator_processes
 
 MANAGER = MODULE_BASE + 0x2780A48
@@ -48,6 +50,23 @@ BATTLE_PLAYER, BATTLE_CHARACTER, CHAR_HP, CHAR_HP_MAX = 0x30, 0x8, 0x28, 0x2C
 # +0x0 / +0x4 (unit index / kind) match the record's. Writing 0 there leaves you at 0 HP and the next hit KOs
 # [confirmed in game 2026-10-27]. [module + 0x277DE3C] = number of unit records (140).
 UNITS, UNITS_TABLE, UNIT_COUNT = MODULE_BASE + 0x2780A80, 0x8, MODULE_BASE + 0x277DE3C
+# Elemental rods (data.RODS): uses left in this mission, u32 per rod at [B + 0x3C8] + 0x910 (Fire, Ice, Lightning). 0 =
+# greyed out in the item palette, can't be used [confirmed on Eden 2026-11-19]. The start count per rod is in the story
+# flag object's table B (save 0x140..), [P + 0x550] + 0x254 + rod.
+ROD_POUCH, ROD_USES, ROD_START = 0x3C8, 0x910, 0x254
+PALETTE_USES = (0x0, 0x4, 0x8, 0x1C)  # from ROD_USES: Fire, Ice, Lightning Rod, apples (data.PALETTE_ITEMS)
+# Rod "obtained" flags (save 0x52F..0x531): [P+0x550] + 0x121 + rod (Fire, Ice, Lightning), saved copy + 0x1500. A rod
+# whose flag is 0 when a mission loads has no slot in the item palette at all; the palette is built at mission load, so
+# a change shows in the next mission [confirmed on Eden 2026-11-19: flags 1,1,0 -> Y and X only]. Found with a write-watch
+# on the save image the game rebuilds at mission start (serializer text 0x9edbd0: object +0 .. +3 = save 0x52E ..).
+ROD_FLAGS, ROD_FLAG_COPIES = 0x121, (0, 0x1500)
+# Apples, same structure (S = [P+0x550]+0x120, saved copy S+0x1500; the save writer text 0x9edb44.. stores S+0..6, then
+# +0x522, +0x524..+0x52A, +0x631 at save 0x52E..0x53D): S+0x631 = apples obtained (save 0x53D), S+0x522 = apples
+# carried into a mission (save 0x535), S+0x524..+0x52A = per kind (save 0x536..0x53C; plain apples +0x526). The item
+# palette's own check (text 0xd868bc) shows it only with a rod flag (S+1..3) or S+0x631 set; mission start (0x6e375c)
+# loads the apple count from S+0x522. [read from the code 2026-11-19; the flag NOT yet confirmed in game]
+APPLE_FLAG, APPLE_TOTAL, APPLE_PLAIN = 0x751, 0x642, 0x646
+PALETTE_FLAGS = (ROD_FLAGS, ROD_FLAGS + 1, ROD_FLAGS + 2, APPLE_FLAG)  # data.PALETTE_ITEMS order
 UNIT_RECORDS, UNIT_SIZE, UNIT_HP = 0x176E70, 0x6C, 0x44
 # HP 0 alone never KOs (the game checks it only when a hit lands). The mission flow state is a u32 at
 # [module + 0x2780A80] + 0xB0 (low byte: 0 = playing, 0x60 = pause menu [seen on Eden], 4 = defeated, 12 = defeat menu).
@@ -61,7 +80,15 @@ FLOW_CLOCK = 0x128  # counts up during an attempt (60 per real second at full ga
 # mission clock ran ~50 ticks/s (the game slows down); back at 30 it ran 60 [confirmed on Eden 2026-11-15].
 FRAME_RATE_BLOCK = 0x26A2280
 FRAME_COUNTER = 0x277DBA8  # u32, +1 per drawn frame
+# World-map scene (2026-11-19, Eden; see REVERSE_ENGINEERING.md "World-map refresh"): [[[main+0x2780AA8]+0x48]+0x80],
+# vtable at module offset 0x26CAF00. +0x134 current state, +0x138 requested state (a change runs the new state's entry
+# code next frame). 0 = the pause menu is open, 1 = rebuild (what closing the menu does), 14 = idle on the map.
+MAP_SCENE_ROOT, MAP_SCENE_PATH, MAP_SCENE_VTABLE = 0x2780AA8, (0x48, 0x80), 0x26CAF00
+MAP_SCENE_STATE, MAP_IDLE, MAP_MENU, MAP_REBUILD = 0x134, 14, 0, 1
+MAP_SCENE_TAB, MAP_TAB_MAP = 0x19C, 4  # open tab: 3 Services, 4 Map, 5 Chapters, 7 Quests
 FRAME_STEP = 0x26A2290  # float, read by the game mod's frame-timing patch (96 sites)
+UI_FRAME_DIVISOR = 0x26A2294  # float, the game mod's UI animation timing (text 0x18cd7c0): 1 / (30 * frame step)
+RENDER_COUNTER = 0x27843F0  # u32, the "AllRender" profiling counter: +1 per drawn frame, also in the pause menu
 # The display's present interval (1.4.1): the graphics object's u32 at +0x2AA4 (2 = every second refresh = 30 FPS on
 # screen), passed to nvnWindowSetPresentInterval each frame (text 0x17D13E8 -> 0x9260). The block alone only changes
 # how often the game updates, which is why the old 60 FPS cheats stopped working; block 60/1 + present interval 1 =
@@ -136,6 +163,9 @@ class HookError(RuntimeError):
 class LiveGame:
     def __init__(self, guest: Guest) -> None:
         self.g = guest
+        self._rods_held: dict[int, int] = {}  # rod slot -> uses to give back when its item arrives mid-mission
+        self._rod_pouch = 0
+        self.material_writes = 0  # materials the client wrote (progress checks count only what the player gathers)
 
     # --- attaching ------------------------------------------------------------------------
 
@@ -180,7 +210,9 @@ class LiveGame:
 
     def save_ok(self) -> bool:
         """Stricter than loaded() (used to find Eden's memory layout, where empty memory passes loaded()): every save
-        block points somewhere different, the quest states look like a game's, and a mission is cleared."""
+        block points somewhere different, the quest states look like a game's, and so do the mission states (one
+        mission open or cleared). 0.9.90: no longer "a mission is cleared": a 0.9.90 starter save has
+        none, and the client never attached to it on Eden."""
         try:
             if not self.loaded():
                 return False
@@ -189,8 +221,10 @@ class LiveGame:
             blob = self.g.read(self._ptr(QUESTS) + S.QUEST_STATE_LIVE, S.QUEST_STATE_COUNT)
             # blob[0] == 1: the same test completed_quests() makes (on Eden it fails for a few seconds while the save
             # loads, which dropped the fresh connection three times)
-            return blob is not None and blob[0] == 1 and max(blob) <= S.QUEST_DONE and len(set(blob)) > 1 \
-                and bool(self.cleared_records())
+            if blob is None or blob[0] != 1 or max(blob) > S.QUEST_DONE or len(set(blob)) <= 1:
+                return False
+            _, states = self._state_lists()  # (raises unless every list holds 0-3 only)
+            return any(s in (2, 3) for s in states[0][1:])
         except HookError:
             return False
 
@@ -202,7 +236,10 @@ class LiveGame:
         blob = self.g.read(base, S.MISSION_RECORD_COUNT * stride)
         if blob is None:
             raise HookError("mission table unreadable")
-        return {i for i in range(S.MISSION_RECORD_COUNT) if any(struct.unpack_from("<6I", blob, i * stride))}
+        # (0.9.90: the per-difficulty clear times, like the save reader and cleared_missions_at; before, the six u32 at
+        # the record start - clear times 4-5 and scores 0-3 - which a clear also fills. Record 0 is never a mission.)
+        return {i for i in range(1, S.MISSION_RECORD_COUNT)
+                if any(S.clear_slots(i, struct.unpack_from("<6I", blob, i * stride + DIFFICULTY_TIMES)))}
 
     def cleared_missions_at(self, min_slot: int) -> set[str]:
         """Missions with a clear time on difficulty slot min_slot or any higher one (a harder clear counts for every
@@ -213,7 +250,7 @@ class LiveGame:
         if blob is None:
             raise HookError("mission table unreadable")
         done = {i for i in range(1, S.MISSION_RECORD_COUNT)
-                if any(struct.unpack_from("<6I", blob, i * stride + DIFFICULTY_TIMES)[min_slot:S.DIFFICULTY_SLOTS])}
+                if any(S.clear_slots(i, struct.unpack_from("<6I", blob, i * stride + DIFFICULTY_TIMES))[min_slot:S.DIFFICULTY_SLOTS])}
         return {name for name, ids in S.MISSION_RECORD_IDS.items() if all(i in done for i in ids)}
 
     def cleared_missions(self) -> set[str]:
@@ -226,6 +263,20 @@ class LiveGame:
         if blob is None or blob[0] != 1 or max(blob) > S.QUEST_DONE:
             raise HookError("quest states not recognised")
         return {name for name, i in S.QUEST_STATE_IDS.items() if blob[i] == S.QUEST_DONE}
+
+    def found_koroks(self) -> set[str]:
+        """Korok seeds found in story missions and challenges ("Korok Seed: <mission> #n"; data_koroks)."""
+        blob = self.g.read(self._ptr(QUESTS) + KOROK_FLAGS_LIVE, KOROK_BLOCK * (CHALLENGE_KOROK_BLOCK + 1))
+        if blob is None or max(blob) > 1:
+            raise HookError("Korok flags not recognised")
+        return {name for name, block, slot in korok_flags() if blob[block * KOROK_BLOCK + slot]}
+
+    def opened_chests(self) -> set[str]:
+        """Treasure chests opened ("Treasure Chest: <mission> #n"; data_chests); set the moment one opens."""
+        blob = self.g.read(self._ptr(PROFILE) + CHEST_FLAGS_LIVE, CHEST_BLOCK * CHEST_BLOCKS)
+        if blob is None or max(blob) > 1:
+            raise HookError("chest flags not recognised")
+        return {name for name, block, slot in chest_flags() if blob[block * CHEST_BLOCK + slot]}
 
     def _hero_addr(self, character: str) -> int:
         field, offset, stride = HEROES
@@ -241,6 +292,35 @@ class LiveGame:
     def hero_level(self, character: str) -> int:
         row = self._hero_row(character)
         return row[HERO_LEVEL] + 1 if row else 0
+
+    def material_counts(self) -> list[int]:
+        """Every material count (u16 per material index, profile +MATERIALS)."""
+        n = 176
+        raw = self.g.read(self._ptr(PROFILE) + MATERIALS, n * 2)
+        if raw is None or len(raw) < n * 2:
+            raise HookError("materials unreadable")
+        return list(struct.unpack(f"<{n}H", raw))
+
+    def best_weapon_levels(self, characters) -> dict[str, int]:
+        """Each hero's highest weapon level among the weapons they own (progress checks)."""
+        pools = self._weapon_pools()
+        if not pools:
+            return {}
+        out = {}
+        for c in characters:
+            slot = S.HERO_SLOTS.get(c)
+            if slot is None:
+                continue
+            raw = self.g.read(pools[0] + slot * WEAPONS_PER_HERO * WEAPON_RECORD, WEAPONS_PER_HERO * WEAPON_RECORD)
+            if not raw:
+                continue
+            best = 0
+            for i in range(WEAPONS_PER_HERO):
+                rec = raw[i * WEAPON_RECORD:(i + 1) * WEAPON_RECORD]
+                if struct.unpack_from("<H", rec, WEAPON_KIND)[0]:
+                    best = max(best, rec[WEAPON_LEVEL] + 1)
+            out[c] = best
+        return out
 
     def rupees(self) -> int:
         raw = self.g.read(self._ptr(PROFILE) + RUPEES, 4)
@@ -299,6 +379,7 @@ class LiveGame:
         return f"+{amount} each: {', '.join(MATERIAL_NAMES.get(i, f'material {i}') for i in picks)}"
 
     def _expect_material(self, what: str, addr: int, old: int, new: int, index: int) -> None:
+        self.material_writes += 1
         self._write(self._ptr(PROFILE) + MATERIALS_SEEN + index, bytes([1]))  # shown in the materials menu
 
         def check():
@@ -639,16 +720,66 @@ class LiveGame:
 
     def set_frame_step(self, ticks: float) -> None:
         """Game mod frame timing: the float frame step (1/60 s ticks the next frame lasts) that the patched movement
-        and timer code reads at main+0x26A2290 (client/rune_mod.py). 2.0 = the game's own 30 FPS step."""
-        raw = self.g.read(MODULE_BASE + FRAME_STEP, 4)  # (compared with memory, not a cache: the game rewrites)
-        if not raw or abs(struct.unpack("<f", raw)[0] - ticks) > 0.005:
-            self._write(MODULE_BASE + FRAME_STEP, struct.pack("<f", ticks))
+        and timer code reads at main+0x26A2290 (client/rune_mod.py). 2.0 = the game's own 30 FPS step.
+        The UI divisor next to it stays at the vanilla 1/60: the layout animations are handed dt = frame step / 60
+        (stub read-watch at 60 FPS, mission and pause menu, 2026-11-19: 1/60 from 0xa6624c), so they already run at
+        real speed; scaling the divisor halved them (the hero-portrait arrow, the world map)."""
+        raw = self.g.read(MODULE_BASE + FRAME_STEP, 8)  # (compared with memory, not a cache: the game rewrites)
+        divisor = 1.0 / 60.0
+        if (not raw or len(raw) < 8 or abs(struct.unpack("<f", raw[:4])[0] - ticks) > 0.005
+                or abs(struct.unpack("<f", raw[4:])[0] - divisor) > divisor * 0.002):
+            self._write(MODULE_BASE + FRAME_STEP, struct.pack("<ff", ticks, divisor))
 
     def set_present(self, present: int) -> None:
         """The display's present interval (checked against memory: the game may set it back)."""
         gfx = self._gfx()
         if gfx is not None and struct.unpack("<I", self.g.read(gfx + GFX_PRESENT_INTERVAL, 4))[0] != present:
             self._write(gfx + GFX_PRESENT_INTERVAL, struct.pack("<I", present))
+
+    def _map_scene(self) -> int | None:
+        """The world-map scene object, or None (not on the map, or not recognised by its vtable)."""
+        p = self.g.u64(MODULE_BASE + MAP_SCENE_ROOT)
+        for off in MAP_SCENE_PATH:
+            if not p:
+                return None
+            p = self.g.u64(p + off)
+        if not p:
+            return None
+        guest_base = MODULE_BASE + getattr(self.g, "shift", 0)  # (Eden: the module's real guest address)
+        return p if self.g.u64(p) == guest_base + MAP_SCENE_VTABLE else None
+
+    def refresh_map(self) -> bool:
+        """Redraw the world map's icons now, as closing the pause menu does, so missions, challenges and quests the
+        client opened appear without the player pausing (user, 2026-11-19). Only while the map is idle (state 14):
+        requests the menu state, then the rebuild state, the same sequence the game runs [confirmed on Eden
+        2026-11-19: states 0, 1, 2, 3 ... 13, 14 like a real menu close; the menu works afterwards]. Requesting the
+        rebuild straight from 14 skipped the menu's resets and left the map without input (state 10). Returns True
+        when the refresh was started. Only on the Map tab: inside the Chapters list a redraw closes the list and jumps
+        to the map (seen 2026-11-20)."""
+        scene = self._map_scene()
+        if scene is None or self.map_tab(scene) != MAP_TAB_MAP:
+            return False
+        raw = self.g.read(scene + MAP_SCENE_STATE, 8)
+        if not raw or struct.unpack("<ii", raw) != (MAP_IDLE, MAP_IDLE):
+            return False
+        self._write(scene + MAP_SCENE_STATE + 4, struct.pack("<i", MAP_MENU))
+        for _ in range(30):  # (one frame: the game takes the request on its next update)
+            time.sleep(0.01)
+            raw = self.g.read(scene + MAP_SCENE_STATE, 8)
+            if raw and struct.unpack("<i", raw[:4])[0] == MAP_MENU:
+                break
+        else:
+            self._write(scene + MAP_SCENE_STATE + 4, struct.pack("<i", MAP_IDLE))  # (not taken: leave the map as it was)
+            return False
+        self._write(scene + MAP_SCENE_STATE + 4, struct.pack("<i", MAP_REBUILD))
+        return True
+
+    def map_tab(self, scene: int | None = None) -> int | None:
+        """The world map's open tab (scene +0x19C): 3 Services, 4 Map, 5 Chapters, 7 Quests [read live on Eden
+        2026-11-20, unchanged by the pause menu]. The cursor kind (map_selection) does not tell the tabs apart."""
+        scene = scene if scene is not None else self._map_scene()
+        raw = self.g.read(scene + MAP_SCENE_TAB, 4) if scene else None
+        return struct.unpack("<i", raw)[0] if raw and len(raw) == 4 else None
 
     def in_mission(self) -> bool:
         """A mission (battle) is loaded: its controlled character exists. False on the world map and in menus."""
@@ -660,6 +791,11 @@ class LiveGame:
         raw = self.g.read(MODULE_BASE + FRAME_RATE_BLOCK + 12, 4)
         if not raw or abs(struct.unpack("<f", raw)[0] - fps) > 0.5:
             self._write(MODULE_BASE + FRAME_RATE_BLOCK + 12, struct.pack("<f", fps))
+
+    def render_count(self) -> int | None:
+        """Frames drawn, counted also in the pause menu (where frame_count stops): the AllRender profiling counter."""
+        raw = self.g.read(MODULE_BASE + RENDER_COUNTER, 4)
+        return struct.unpack("<I", raw)[0] if raw else None
 
     def frame_count(self) -> int | None:
         """A counter the game raises once per drawn frame (main+0x277DBA8, found 2026-11-15)."""
@@ -1094,10 +1230,109 @@ class LiveGame:
         state, _, request = struct.unpack("<III", raw)
         return flow, state & 0xFF, request
 
+    def _rod_uses_address(self) -> int | None:
+        """Address of the rods' uses-left counters in the running mission, None outside missions."""
+        if not self._battle_character():
+            return None
+        def ptr(va: int) -> int | None:
+            raw = self.g.read(va, 8)
+            v = struct.unpack("<Q", raw)[0] if raw else 0
+            return v if 0x10_0000_0000 <= v < 0x24_0000_0000 else None
+        holder = ptr(BATTLE)
+        player = ptr(holder + BATTLE_PLAYER) if holder else None
+        pouch = ptr(player + ROD_POUCH) if player else None
+        return pouch + ROD_USES if pouch else None
+
+    def hold_rods(self, locked: list[bool]) -> list[str]:
+        """Item palette lock (rod_items, apple_items): every locked item (data.PALETTE_ITEMS) is held at 0 (one picked
+        up in the mission is taken away again); one whose item arrived mid-mission gets back what it was held from.
+        Returns what changed ("Fire Rod held", "Apples given back")."""
+        from ..data import PALETTE_ITEMS as RODS
+        addr = self._rod_uses_address()
+        if addr is None:
+            self._rods_held, self._rod_pouch = {}, 0
+            return []
+        if addr != self._rod_pouch:  # a new mission (or a restart): nothing held yet
+            self._rods_held, self._rod_pouch = {}, addr
+        raw = self.g.read(addr, PALETTE_USES[-1] + 4)
+        if not raw:
+            return []
+        uses = [struct.unpack_from("<I", raw, o)[0] for o in PALETTE_USES]
+        if max(uses) > 50:
+            return []  # not the rods (layout not recognised)
+        changed = []
+        for slot, (rod, lock, have) in enumerate(zip(RODS, locked, uses)):
+            if lock and have:
+                self._rods_held[slot] = max(have, self._rods_held.get(slot, 0))
+                self._write(addr + PALETTE_USES[slot], struct.pack("<I", 0))
+                changed.append(f"{rod} held")
+            elif not lock and slot in self._rods_held:
+                give = self._rods_held.pop(slot)
+                if have == 0:
+                    if give == 0 and slot < 3:
+                        give = self._rod_start(slot)
+                    if give:
+                        self._write(addr + PALETTE_USES[slot], struct.pack("<I", give))
+                        changed.append(f"{rod} given back")
+            elif lock:
+                self._rods_held.setdefault(slot, 0)
+        return changed
+
+    def set_rod_flags(self, have: list[bool | None]) -> list[str]:
+        """Item palette unlocks (rod_items, apple_items): each item's obtained flag (current and saved copy), in
+        data.PALETTE_ITEMS order (Fire, Ice, Lightning Rod, Apples; None = leave that one alone), so a locked item has no
+        palette slot from the next mission on. A rod given gets the base 2 uses if its start count is 0 (a fresh save);
+        apples given with none carried get 5 plain apples. Returns what changed ("Fire Rod shown", "Apples hidden")."""
+        from ..data import PALETTE_ITEMS
+        base = self._ptr(STORY_FLAGS)
+        flags = [self.g.read(base + off, 1) for off in PALETTE_FLAGS]
+        if any(not f or f[0] > 1 for f in flags):
+            raise HookError("item palette flags not recognised")
+        changed = []
+        for slot, (item, want) in enumerate(zip(PALETTE_ITEMS, have)):
+            if want is None:
+                continue
+            for copy in ROD_FLAG_COPIES:
+                cur = self.g.read(base + copy + PALETTE_FLAGS[slot], 1)
+                if cur and cur[0] != int(want):
+                    self._write(base + copy + PALETTE_FLAGS[slot], bytes([int(want)]))
+                    if copy == 0:
+                        changed.append(f"{item} {'shown' if want else 'hidden'}")
+            if not want:
+                continue
+            if slot < 3:
+                for copy in (0, 3 * 0x700):
+                    start = self.g.read(base + copy + ROD_START + slot, 1)
+                    if start and start[0] == 0:
+                        self._write(base + copy + ROD_START + slot, bytes([2]))
+            else:
+                for copy in ROD_FLAG_COPIES:
+                    total = self.g.read(base + copy + APPLE_TOTAL, 1)
+                    kinds = self.g.read(base + copy + APPLE_TOTAL + 2, 7)
+                    if total == bytes(1) and kinds == bytes(7):
+                        self._write(base + copy + APPLE_TOTAL, bytes([5]))
+                        self._write(base + copy + APPLE_PLAIN, bytes([5]))
+        return changed
+
+    def _rod_start(self, slot: int) -> int:
+        """A rod's start-of-mission uses from the save's table B (0 if unreadable)."""
+        try:
+            raw = self.g.read(self._ptr(STORY_FLAGS) + ROD_START + slot, 1)
+        except HookError:
+            return 0
+        return raw[0] if raw and 0 < raw[0] <= 20 else 0
+
+    def deathlink_hook_active(self) -> bool:
+        """The game mod's DeathLink hook (0.9.91, rune_mod.DEATHLINK_*) is in the running game."""
+        from .rune_mod import DEATHLINK_HOOK, DEATHLINK_HOOK_CODE
+        return self.g.read(MODULE_BASE + DEATHLINK_HOOK, 4) == DEATHLINK_HOOK_CODE
+
     def kill_player(self) -> bool:
-        """DeathLink: real HP (and the display copy) to 0, held by hold_death: the next hit is then a real KO, with the
-        game's own death animation and defeat menu (Eden, 2026-11-03). Forcing the flow states instead froze the game
-        on the defeat picture. Returns False outside play (no character, real HP not found, or not playing)."""
+        """DeathLink: real HP (and the display copy) to 0, then (game mod 0.9.91+) the game's own "unit defeated" for the
+        hero through the mod's hook: the KO, the mission script's EndBattle and the normal defeat menu ~2 s later, no
+        hit needed [Eden 2026-11-19]. self.instant_kill says whether that happened; without the hook the HP is held at
+        0 by hold_death and the next hit is the KO (as before). Forcing the flow states instead froze the game on the
+        defeat picture. Returns False outside play (no character, real HP not found, or not playing)."""
         char = self._battle_character()
         real = self._unit_hp(char) if char else None
         flow = self._flow()
@@ -1105,6 +1340,12 @@ class LiveGame:
             return False
         self._write(real, struct.pack("<f", 0.0))
         self._write(char + CHAR_HP, struct.pack("<f", 0.0))
+        self.instant_kill = False
+        if self.deathlink_hook_active():
+            from .rune_mod import DEATHLINK_REQUEST
+            unit = struct.unpack("<I", self.g.read(real - UNIT_HP, 4))[0]  # (the unit record starts with its index)
+            self._write(MODULE_BASE + DEATHLINK_REQUEST, struct.pack("<I", unit + 1))
+            self.instant_kill = True
         self._hold_clock = struct.unpack("<I", self.g.read(flow[0] + FLOW_CLOCK, 4))[0]
         self._hold_reals = {char: real}
         return True

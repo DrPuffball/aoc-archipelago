@@ -9,6 +9,11 @@ of Hyrule Field with Link and Impa) is skipped and you start on the world map wi
 seed's first missions (`first_mission`, default any story mission; with the default `mission_unlocks: items` you
 start with 2 unlocked).
 
+**The Battle of Hyrule Field** is a normal story mission: it can be in any slot,
+has its own unlock item and real checks, and plays as the game's own first mission (the opening, then the battle as
+Link) when you get to it. The client's game mod stops the game from forcing it at the start; the client installs the
+mod by itself while the emulator is closed. (In Challenges Only it comes cleared in the starter save.)
+
 **Switching seeds:** each save belongs to the seed it was played with. Connect to another seed with the game closed
 and the client swaps the saves: the current one is kept in `%USERPROFILE%/AoC_Archipelago/saves`, and the other
 seed gets its own save back (or a starter save if it's new). While the game runs another seed's save, the client
@@ -75,18 +80,23 @@ difficulty setting to at least that level whenever you are on the map.
 on level clears, spread evenly (bonus checks sent with each clear); recipes are items.
 - **Story Only:** every check is on story missions (the Guardian of Remembrance missions too with the DLC). Each
   clear opens one new random story mission; with `mission_unlocks: items` (the default) story missions open by
-  their unlock items instead, as in Standard. The goal is `goal_story_missions` clears.
+  their unlock items instead, as in Standard. The goal is `goal_story_missions` clears. Korok seed and chest checks
+  are the story missions' own (122 seeds, 153 chests, plus the Expansion Pass story's 28 chests).
 - **Challenges Only:** every check is on challenge missions; story missions (except the pre-cleared Battle of
   Hyrule Field) and map quests don't appear. Each clear opens 3-8 more challenges; with
   `challenge_unlock_order: items` each challenge opens by its own unlock item instead, and 12 start unlocked. The goal
-  is `goal_challenges` clears (0 = 50).
+  is `goal_challenges` clears (0 = 50). Korok seed checks are the 12 seeds inside challenges; chest checks are only
+  the Expansion Pass story's 28 chests (with the DLC those missions are challenges here).
 
 ## Pacing and DeathLink
 
 There are no traps. With `steady_rewards` (on by default) story mission clears never hold your own filler.
 `hero_level_cap` keeps heroes at 99 (they still level up and refill). With `death_link` on, your hero's HP reaching 0
-in a mission is sent to the others, and a death from someone else drops your health to 0 until your next hit, which brings up the
-defeat menu (healing and switching heroes won't save you); deaths that arrive while you're not in a mission are ignored.
+in a mission is sent to the others, and a death from someone else defeats you at once: your health drops to 0 and the
+game's normal defeat menu comes up (Restart Battle / Exit Scenario). Deaths that arrive while you're not in a mission are
+ignored, and one that arrives while the game is paused lands when you unpause. (This needs the client's game mod from
+0.9.91; with an older copy still installed your health stays at 0 until the next hit instead. Close the emulator once
+and the client updates it.)
 
 ## Side content
 
@@ -99,6 +109,25 @@ Maz Koshia's trial and the fairy fountain challenges still wait for their quests
 releases or collects, quests whose checks are already gone are completed for you (with their reward when the client
 knows it). `region_hope_checks` makes each region's 100% "Hope" quest a check.
 
+## Korok seeds, chests and progress checks
+
+`korok_checks` and `chest_checks` (on by default) make every Korok seed ("Korok Seed: <mission> #n") and treasure chest
+("Treasure Chest: <mission> #n") a check, sent the moment you find it. Seeds and chests that need a rune (Stasis
+targets, bombable rocks, half-buried chests) expect that rune first.
+
+Off by default ("Progress Checks" group):
+- `hero_level_checks`: a check per hero every `hero_level_check_interval` levels up to `hero_level_check_max`
+  ("Hero Level: Link Lv 20"). Higher levels expect more of the story first.
+- `weapon_level_checks`: a check per hero when their best weapon reaches every `weapon_level_check_interval` levels
+  up to `weapon_level_check_max` ("Weapon Level: Link Lv 10"). The game caps weapons at 20, 25 after A Monumental
+  Undertaking and 30 after The Legendary Blacksmith; levels above a cap need its quest (or are left out).
+- `enemy_defeat_checks`: enough of an enemy type defeated, counted by the trophies earned in total ("Defeated: Lynel
+  (1)"). `material_checks`: enough of a material gathered in total ("Gathered: Hyrule Herb (2)"). Up to
+  `gathering_check_tiers` rising counts each, scaled by `enemy_defeat_scale` / `material_scale` (percent). The client
+  keeps the totals from the moment the seed first connects: spending doesn't lower them, and materials the client
+  hands you don't count. Type `/gathered` (or use the Options tab) to see your totals and the next count each needs.
+  A material held at the game's 999 limit gains nothing until some is spent.
+
 ## Sheikah Slate runes
 
 `sheikah_runes` (default `shuffled`): all four runes from the start (`start_with_all`), `shuffled` (each rune is an item, Remote
@@ -108,14 +137,24 @@ The unmodded game hands runes out whenever those story missions count as cleared
 patch (the "AoC Archipelago" mod for game version 1.4.1, which also does the frame rates below) into Eden's and Ryujinx's mod folders while the emulator is
 closed. With it, the game shows exactly the runes the client gives. Start the client before the game.
 
+## Elemental rods and apples
+
+`rod_items` (default on): the Fire Rod, Ice Rod and Lightning Rod are items. A rod whose item hasn't been found has no
+slot in the item palette (hold L) at all, and one picked up in a mission is taken away again. The palette is set up when
+a mission loads, so a rod found mid-mission appears from the next mission on. The lab's
+"An Apple a Day" research (fire rod kills) expects the Fire Rod first. Off: the rods work as in the normal game.
+
+`apple_items` (default off): healing apples are an item ("Apples"). Until it is found the apple slot (hold L, then B)
+has no slot in the palette, and the apple count stays at 0 in missions as a fail-safe. Like the rods, it appears
+from the next mission after the item arrives.
+
 ## Frame rate
 
-`frame_rate` (default `fps_30`, the game's own; the higher modes are experimental): `fps_60`, `fps_120` or `unlimited` let the game draw up to that many frames a second
-in gameplay (cutscenes, menus and the world map stay at the game's own 30); `fps_30` is the game's own; `off` leaves
-it alone. The game normally slows down when it can't draw its target frame rate; the client keeps it at real-time
+`frame_rate` (default `off`, the game's own 30 left alone; the higher modes are experimental): `fps_60`, `fps_120` or `unlimited` let the game draw up to that many frames a second
+in gameplay (cutscenes, menus and the world map stay at the game's own 30). An older YAML's `fps_30` means `off`. The game normally slows down when it can't draw its target frame rate; the client keeps it at real-time
 speed whatever your PC draws, by choosing how many of the game's 1/60 s steps each drawn frame takes. How many frames
 you get depends on your PC and emulator settings (resolution scale and GPU accuracy cost the most).
-In the client, `/fps 60`, `/fps 120`, `/fps unlimited`, `/fps 30`, `/fps off` or `/fps seed` change it for your game;
+In the client, the Options tab or `/fps 60`, `/fps 120`, `/fps unlimited`, `/fps off` or `/fps seed` change it for your game;
 `/fps` shows it. Remove other 60 FPS cheats for the game: they fight the client.
 
 ## Rules of the story
@@ -132,5 +171,5 @@ later slot also require completed challenges and quests (slot N needs N x that m
 
 - EX Alerts stay playable but never hold checks (except Forgotten Temple): the game gives each one a monster when it
   appears, which the client can't set yet.
-- Windows only; Ryujinx (Memory Manager Mode Software) or Eden (CPU accuracy Auto); both tested in full play.
+- Windows only; Ryujinx (Memory Manager Mode Software) or Eden (CPU accuracy Unsafe or Auto; recommended); both tested in full play.
 - Universal Tracker works with this world without your YAML.

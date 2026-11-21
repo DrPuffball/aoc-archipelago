@@ -18,6 +18,7 @@ from worlds.generic.Rules import add_item_rule
 
 from .data import LEVEL_BAND_GATES
 from .data_challenges import CHALLENGE_BY_NAME
+from .data_chests import chest_location
 from .data_koroks import korok_location
 from .data_quests import CHAPTER_TWO_MISSIONS, QUEST_BY_NAME
 from .items import UNLOCK_PREFIX
@@ -71,7 +72,7 @@ def candidate_locations(world: AgeOfCalamityWorld) -> dict[str, int]:
     stages: dict[str, int] = {}
     for mission in world.mission_order:
         party = world.mission_party.get(mission, ())
-        if not party:
+        if not party and world.clear_checked(mission):
             stages[mission_location(mission)] = _slot(world, mission)
     for name in () if world.quest_random else world.checked_quests:  # random quest unlocks: no story stage
         if not quest_needs_characters(name):
@@ -79,6 +80,9 @@ def candidate_locations(world: AgeOfCalamityWorld) -> dict[str, int]:
     for source, kind, index in world.checked_koroks:
         if kind == "mission" and not world.mission_party.get(source, ()):
             stages[korok_location(source, index)] = _slot(world, source)
+    for mission, index in world.checked_chests:
+        if mission in world.mission_order and not world.mission_party.get(mission, ()):
+            stages[chest_location(mission, index)] = _slot(world, mission)
     return stages
 
 
@@ -226,7 +230,8 @@ def exclude_post_goal(world: AgeOfCalamityWorld) -> list[str]:
         post_goal = [loc for loc in post_goal if loc.parent_region is not None]
     filler = sum(1 for i in multiworld.itempool if i.player == player and i.filler)
     shortage = len(post_goal) - filler
-    reachable = [m for m in world.mission_order if world.get_location(mission_location(m)).can_reach(state)]
+    reachable = [m for m in world.mission_order
+                 if world.clear_checked(m) and world.get_location(mission_location(m)).can_reach(state)]
     from .locations import challenge_location  # the DLC story missions are story missions too: same share
     reachable += [c for c in getattr(world, "dlc_story", ()) if world.get_location(challenge_location(c)).can_reach(state)]
     if moved:  # the dropped bonus checks come back on pre-goal clears (their items still need room)
@@ -285,7 +290,7 @@ def _bonus_count(world: AgeOfCalamityWorld, name: str) -> int:
 def add_more_bonus_checks(world: AgeOfCalamityWorld, missions: list[str], count: int) -> int:
     """Up to `count` more bonus checks spread over these story clears (BONUS_PER_MISSION each at most)."""
     from .locations import BONUS_PER_MISSION, bonus_location, challenge_bonus_location, create_location
-    missions = [m for m in missions if m != world.mission_order[0]]  # pre-cleared in the starter save (add_bonus_checks)
+    missions = [m for m in missions if m not in world.mission_order[:world.first_real_slot]]  # (a pre-cleared HF)
     added = 0
     while added < count:  # always the clear with the fewest so far: they come out even
         open_missions = [m for m in missions if _bonus_count(world, m) < BONUS_PER_MISSION]
@@ -302,6 +307,36 @@ def add_more_bonus_checks(world: AgeOfCalamityWorld, missions: list[str], count:
             world.bonus_checks[mission] = k
         added += 1
     return added
+
+
+def place_local_filler(world: AgeOfCalamityWorld) -> None:
+    """local_filler: put this world's filler into its own checks before the main fill. The option makes the filler
+    local (it may only go into this world's checks), but nothing else keeps room for it: in a multiworld the other
+    worlds' items can take every one of our checks first, leaving our filler nowhere to go (fuzz 2026-11-20, a
+    3-player seed: "No more spots to place 10 items", our filler refused by the last 11 checks of the others).
+    Filler never matters to logic, so placing it first is safe. Excluded (post-goal) checks take it first, then
+    random checks that accept it (story clears with steady_rewards don't); priority checks are left for the fill."""
+    multiworld, player = world.multiworld, world.player
+    if not world.options.local_filler or multiworld.players == 1:
+        return  # (alone, every check is ours: the counts match)
+    filler = [i for i in multiworld.itempool if i.player == player and i.filler]
+    if not filler:
+        return
+    free = [loc for loc in multiworld.get_unfilled_locations(player)
+            if loc.address is not None and loc.progress_type != LocationProgressType.PRIORITY]
+    world.random.shuffle(free)
+    free.sort(key=lambda loc: loc.progress_type != LocationProgressType.EXCLUDED)  # excluded first (stable sort)
+    world.random.shuffle(filler)
+    for loc in free:
+        if not filler:
+            break
+        item = next((i for i in filler if loc.can_fill(multiworld.state, i, False)), None)
+        if item is None:
+            continue
+        loc.place_locked_item(item)
+        loc.locked = False  # (an ordinary check: collect/release treat it as any other)
+        filler.remove(item)
+        multiworld.itempool.remove(item)
 
 
 def ensure_room(world: AgeOfCalamityWorld) -> None:

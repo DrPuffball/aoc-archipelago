@@ -18,8 +18,9 @@ client says the save was set up (about 10 seconds), then start the game again. I
 a save with progress it can't place, type `/starter_save` (that save is kept in `%USERPROFILE%\AoC_Archipelago\saves`).
 
 **The Smithy, the Training Camp or new icons are missing on the map.**
-Pause and return to the map once: the map can be drawn before the client finishes setting up. If the Smithy is still
-missing, check your YAML: with `weapon_fusion: true` it opens only with the Weapon Fusion item (and its quest bought).
+The client redraws the map by itself, but only while the Map tab is showing (not the Chapters or Quests list): go
+back to the Map tab, or pause and return to the map once. If the Smithy is still missing, check your YAML: with
+`weapon_fusion: true` it opens only with the Weapon Fusion item (and its quest bought).
 
 **The client holds clears back and asks for `/accept_save`** (notice "Clears held back").
 The save in the emulator showed many clears the server has never seen, or would finish your goal at once. That usually
@@ -33,13 +34,18 @@ the game > Manage Mods). When the game starts, the client log says "Archipelago 
 
 **The frame rate stays at 30, or the game runs too fast or too slow.**
 `frame_rate` above 30 is experimental and needs the client connected and the game mod active. Check the mode with
-`/fps` and change it with `/fps 60`, `/fps unlimited` and so on. Remove any other 60 FPS cheat or mod for the game. In
-Eden keep "Fast CPU time" off (it makes the game run fast). Cutscenes, menus and the world map always stay at 30.
-`/fps off` leaves the game's frame timing alone.
+`/fps` (or the client's Options tab) and change it there or with `/fps 60`, `/fps unlimited` and so on. Remove any
+other 60 FPS cheat or mod for the game. In Eden keep "Fast CPU time" off (it makes the game run fast). Cutscenes and the
+world map always stay at 30; the pause menu does too unless switched on in the Options tab. `/fps off` leaves the
+game's frame timing alone.
+
+**A rod or apples are missing from my item palette.**
+With `rod_items` (or `apple_items`) each one appears once you have its item, from the next mission you start: one
+found mid-mission shows after that mission.
 
 **The client says it can't find or read the game.**
 Load your save (the title screen isn't enough). Ryujinx: Options > Settings > System > Memory Manager Mode
-**Software**. Eden: CPU accuracy **Auto**. The game must be v1.4.1. Open only one emulator at a time.
+**Software**. Eden: CPU accuracy **Unsafe** or **Auto** (not Accurate or Paranoid). The game must be v1.4.1. Open only one emulator at a time.
 
 **"Several emulators are open".**
 Close all but one. The client won't touch the game or your saves while it can't tell which one is playing.
@@ -62,8 +68,9 @@ That's expected: the game gives each Alert its monster when it appears, which th
 and play as in the normal game (Forgotten Temple, the Battle-Tested Guardian fight, is a normal check).
 
 **DeathLink: my health went to 0 but I'm still alive.**
-That's expected: a received death holds your health at 0 until your next hit, which brings up the defeat menu.
-Healing and switching heroes won't save you. Leaving the mission or restarting it from the pause menu ends it.
+With the game mod active a received death defeats your hero at once. Without it (an older mod, or the mod off) the
+death holds your health at 0 until your next hit, which brings up the defeat menu; healing and switching heroes won't
+save you, and leaving or restarting the mission ends it. Close the emulator with the client open to install the mod.
 
 **Switching between Ryujinx and Eden.**
 Start the game once in the other emulator, close it, and type `/sync_saves`. After that the client keeps both copies

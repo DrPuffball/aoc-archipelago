@@ -30,6 +30,11 @@ OLD_MOD_NAMES = ("AoC Archipelago Runes",)
 PATCH_FILE = "rune_mod.ips"
 # A patched instruction to recognise the patch in memory: text 0xF83D8 "mov w0, #111" (vanilla "mov w0, #6").
 CHECK_OFFSET, CHECK_PATCHED, CHECK_VANILLA = 0xF83D8, bytes.fromhex("e00d8052"), bytes.fromhex("c0008052")
+# DeathLink hook (0.9.91, tools/selftest/make_rune_patch.py): the battle flow update (text 0x863120) branches to a hook
+# (a chain of unused alignment gaps from text 0x1B40054) that calls "unit defeated" (text 0x6B41C0) for unit
+# (word - 1) when the word at main+0x26A2298 is set, then clears it. (0.9.92: was in the page padding after the text
+# segment, 0x1B55940, which Ryujinx doesn't load: "b 0x1B55940" = 08ca4b14 is an older mod that crashes Ryujinx.)
+DEATHLINK_HOOK, DEATHLINK_HOOK_CODE, DEATHLINK_REQUEST = 0x863120, bytes.fromhex("cd734b14"), 0x26A2298
 # Story flag table offsets (from save 0x14, as live_hook.RUNE_FLAGS) of the flags the patched game reads.
 MOD_RUNE_FLAGS = {"Remote Bombs": 0x73 - 0x14, "Cryonis": 0x74 - 0x14, "Magnesis": 0x75 - 0x14, "Stasis": 0x76 - 0x14,
                   "Sheikah Slate": 0x82 - 0x14}

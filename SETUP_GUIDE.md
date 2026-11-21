@@ -22,8 +22,9 @@ No emulator, keys, firmware or game files are provided or linked here.
 2. **Emulator setting:**
    - **Ryujinx:** Options > Settings > System > **Memory Manager Mode: Software**. Save, and restart the game if it
      was running. The client can't see the game without this.
-   - **Eden:** leave **CPU accuracy on Auto** (the default). The client needs Eden's fast memory mapping, which the
-     stricter accuracy settings turn off.
+   - **Eden (recommended: actively updated, and the faster of the two):** set **CPU accuracy to Unsafe** (Emulation >
+     Configure > CPU) for about 10% more frames in battle, or leave it on Auto. Not Accurate or Paranoid: the client
+     needs Eden's fast memory mapping, which those turn off.
 3. **The game mod installs itself:** the client puts the "AoC Archipelago" mod into Eden and Ryujinx whenever no
    emulator is running (start the client before the game). It shows in the game's Add-Ons list; leave it on. It makes
    shuffled runes work and holds the optional frame-rate support. Remove any other 60 FPS cheat or mod for the game:
@@ -43,8 +44,13 @@ the multiworld (they need the apworld too). Every option has a tooltip; good def
 most people change:
 
 - `starting_character_count`: how many random heroes you start with (default 4).
-- `challenge_checks`, `quest_checks`, `lab_checks`, `weapon_checks`: what holds checks (default: challenges, quests and
-  the Royal Ancient Lab on, weapons off).
+- `challenge_checks`, `quest_checks`, `lab_checks`, `weapon_checks`, `korok_checks`, `chest_checks`: what holds
+  checks (default: challenges, quests, the Royal Ancient Lab, Korok seeds and treasure chests on, weapons off).
+- Progress checks, all off by default: `hero_level_checks`, `weapon_level_checks` (a check every few levels),
+  `enemy_defeat_checks`, `material_checks` (defeat or gather enough in total; `gathering_check_tiers` and the scales
+  set how many and how far).
+- `rod_items` (on): the Fire, Ice and Lightning Rod are items and a rod's slot stays hidden until you find it.
+  `apple_items` (off): healing apples are an item too.
 - `challenge_unlock_order`, `quest_unlock_order`: randomized (a few open, 2-4 more after each completion) or vanilla.
 - `mission_unlocks`: `items` (default) = each story mission opens with its own item from the multiworld (you start
   with 2, hinted for free); `story_order` = in order. `first_mission` (default any) picks the starting ones.
@@ -57,22 +63,27 @@ most people change:
 - `hint_mission_unlocks`, `hint_heroes`: free hints at the start. `hero_level_cap`: heroes stay at 99.
 - `sheikah_runes`: `shuffled` (default) = all four runes, Remote Bombs included, are items (uses the game mod);
   `start_with_all` or `vanilla`.
-- `frame_rate` (experimental): `fps_30` (default, the game's own), `fps_60`, `fps_120`, `unlimited` or `off`. Above 30
-  the game stays at real speed however many frames your PC manages. Battles only; can be changed any time with `/fps`.
-- `death_link`: share deaths with the other players.
+- `frame_rate` (experimental): `off` (default, the game's own 30), `fps_60`, `fps_120` or `unlimited`. Above 30 the
+  game stays at real speed however many frames your PC manages. Change it any time in the client's Options tab or with
+  `/fps`.
+- `death_link`: share deaths with the other players. A received death defeats your hero at once (the game's normal
+  defeat menu; Restart Battle works).
 
 ## Play
 
 1. Keep the game **closed**. Open the Archipelago Launcher > **Age of Calamity Client** and connect to the room:
    the address (for example `archipelago.gg:38281`) and your slot name.
 2. The client sets up this seed's save by itself and says so in its window ("Starter save installed"), and
-   installs or updates the game mod. A new seed starts on the world map with your random starting heroes.
+   installs or updates the game mod. A new seed starts on the world map with your random starting heroes. The Battle
+   of Hyrule Field is shuffled into the story like any other mission (pre-cleared in `challenges_only`).
 3. Start Age of Calamity in your emulator and pick **Continue**. The client finds the game by itself
    ("Connected to Age of Calamity in Ryujinx" or "... in Eden", then "Archipelago game mod active").
 4. Play. Everything is automatic:
-   - Clears, quests and challenges you complete are sent to the multiworld.
+   - Clears, quests and challenges you complete are sent to the multiworld, and Korok seeds and chests the moment you
+     pick them up.
    - Heroes, upgrades, quest rewards, runes, weapons, rupees, materials and XP you receive appear in game.
-   - The world map only lets you start what your seed has opened, and new challenges and quests open as you go.
+   - The world map only lets you start what your seed has opened, and new challenges and quests open as you go. The
+     map redraws by itself when something opens (while you're on its Map tab).
    - Short notices appear in the corner of the emulator window, including what a highlighted mission or quest holds.
    - When other players release or collect, quests whose checks are already gone are completed for you. Their
      reward is given too where the client knows it; otherwise they stay open so you can still earn it.
@@ -105,12 +116,17 @@ server.
 
 ## Client commands (optional)
 
-`/todo` your goal progress and what you can play now · `/inventory` what you have received · `/check_hook` the game connection ·
+The client window's **Options** tab has a button or switch for every command, grouped by what it's for: frame rate,
+display, your progress, saves and troubleshooting. Hover one to see what it does; buttons ending in "…" ask before
+doing anything. Or type them:
+
+`/todo` your goal progress and what you can play now · `/inventory` what you have received · `/gathered` your progress-check totals · `/check_hook` the game connection ·
 `/deliver` items waiting for the game · `/saves` which save belongs to which seed · `/sync_saves` copy your save to
-the other emulator now · `/ryujinx_folder` where the client looks for Ryujinx saves · `/starter_save` replace a save
-the client doesn't recognise (it is kept, not deleted) · `/goal_banner on|off` the goal progress banner on the map ·
+the other emulator now · `/emulator_folder` where the client looks for Ryujinx and Eden saves · `/starter_save` replace a save
+the client doesn't recognise (it is kept, not deleted) · `/goal_banner on|off` the goal progress banner on the map · `/deathlink on|off|seed` DeathLink on or off
+whenever you like (`seed` = your YAML's `death_link`) ·
 `/research on|off` game research for testers: records what the game did with each change, on your PC only ·
-`/fps 30|60|120|unlimited|off|seed` the frame-rate mode (experimental; `seed` goes back to your YAML's choice) ·
+`/fps 60|120|unlimited|off|seed` the frame-rate mode (experimental; `seed` goes back to your YAML's choice) ·
 `/accept_save` send the clears of a save the client held back (it holds them when a save looks like it belongs to
 another seed, for example many clears the server has never seen; only accept if the save really is this seed's).
 
@@ -120,10 +136,11 @@ The full guide is `TROUBLESHOOTING.md`. The most common ones:
 
 
 - **"No Age of Calamity save found":** start the game once in your emulator. If your Ryujinx is portable or keeps
-  its data elsewhere, open Ryujinx > File > Open Ryujinx Folder, copy that folder's path and type
-  `/ryujinx_folder <that path>` in the client. A portable Eden is found while Eden is running.
+  its data elsewhere, click **Pick emulator folder…** in the client's Options tab and choose the folder (Ryujinx >
+  File > Open Ryujinx Folder shows it), or type `/emulator_folder <that path>`. A portable Eden is found while Eden
+  is running.
 - **"An emulator is running Age of Calamity but the client can't read the game":** Ryujinx: check Memory Manager
-  Mode is Software (then restart the game). Eden: check CPU accuracy is Auto. Both: the game must be v1.4.1 (the
+  Mode is Software (then restart the game). Eden: check CPU accuracy is Unsafe or Auto. Both: the game must be v1.4.1 (the
   window title shows it), and pick Continue to load a save.
 - **"Several emulators are open":** close all but one.
 - **"Save not changed: ...":** the client refused to replace a save it can't place (it says why). Nothing is lost.
@@ -133,12 +150,12 @@ The full guide is `TROUBLESHOOTING.md`. The most common ones:
 
 ## Known limits
 
-- Shuffled runes need the game mod (installed by the client). The Battle of Hyrule Field still starts the game
-  pre-cleared, and its moblins spawn without runes.
-- Frame rates above 30 are experimental: cutscenes, menus and the world map stay at 30; at the end of a mission the
-  frame rate can drop to 30 while the last text boxes play; flurry rushes can feel a little off above 30. How many
-  frames you get depends on your PC (the emulated CPU is the usual limit). In Eden keep "Fast CPU time" off: it makes
-  the game run fast.
+- Shuffled runes, rods, instant DeathLink and the higher frame rates need the game mod (installed by the client).
+  The Battle of Hyrule Field's moblins spawn without runes.
+- Frame rates above 30 are experimental: cutscenes and the world map stay at 30, and the pause menu does too
+  unless you switch it on in the Options tab; flurry rushes can feel a little off above 30. How many frames you get depends
+  on your PC (the emulated CPU is the usual limit). In Eden keep "Fast CPU time" off: it makes the game run fast.
+- A rod or apple found mid-mission shows in your item palette from the next mission on.
 - The Expansion Pass is on by default (include_dlc): the Guardian of Remembrance missions are story missions, EX
   challenges and quests hold checks, and Purah & Robbie, Sooga and the Battle-Tested Guardian are items. EX Alerts
   stay playable but never hold checks (except Forgotten Temple). Without the DLC in your emulator, the client

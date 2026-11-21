@@ -12,6 +12,8 @@ import random
 import struct
 
 from .. import data_save as L
+from ..data_chests import CHEST_BLOCK, CHEST_FLAGS_SAVE, chest_flags
+from ..data_koroks import KOROK_BLOCK, KOROK_FLAGS_SAVE, korok_flags
 
 
 class SaveFormatError(ValueError):
@@ -28,7 +30,7 @@ def check_save(data: bytes) -> None:
 def cleared_records(data: bytes) -> set[int]:
     out = set()
     for i in range(L.MISSION_RECORD_COUNT):
-        if any(struct.unpack_from("<6I", data, L.MISSION_RECORDS + i * L.MISSION_RECORD_SIZE + 4)):
+        if any(L.clear_slots(i, struct.unpack_from("<6I", data, L.MISSION_RECORDS + i * L.MISSION_RECORD_SIZE + 4))):
             out.add(i)
     return out
 
@@ -52,6 +54,16 @@ def owned_weapons(data: bytes) -> set[str]:
         if kind:
             kinds.add(kind)
     return {name for name, ks in L.WEAPON_KINDS.items() if kinds & set(ks)}
+
+
+def found_koroks(data: bytes) -> set[str]:
+    """Korok seeds the save shows found ("Korok Seed: <mission or challenge> #n")."""
+    return {name for name, block, slot in korok_flags() if data[KOROK_FLAGS_SAVE + block * KOROK_BLOCK + slot] == 1}
+
+
+def opened_chests(data: bytes) -> set[str]:
+    """Treasure chests the save shows opened ("Treasure Chest: <mission> #n")."""
+    return {name for name, block, slot in chest_flags() if data[CHEST_FLAGS_SAVE + block * CHEST_BLOCK + slot] == 1}
 
 
 # --- reading/writing single fields -------------------------------------------------------

@@ -69,14 +69,31 @@ def template() -> bytes:
     return data
 
 
+def unclear_hyrule_field(data: bytearray) -> None:
+    """Hyrule Field shuffled (0.9.90): The Battle of Hyrule Field as a fresh, locked mission. Its record becomes a
+    never-played one (copied from Mipha's, untouched in the template) plus a clear time in slot 5 (data_save
+    HF_MARKER_SLOT: without any clear time the mission loads the New Game opening and hangs when started from the
+    map); its state is "locked" until prepare() opens it. Needs the game mod's forced-opening patch (rune_mod.ips),
+    or Continue goes to the New Game settings screen [both confirmed on Eden 2026-11-19]."""
+    size = L.MISSION_RECORD_SIZE
+    fresh_record = L.MISSION_RECORD_IDS["Mipha, the Zora Princess"][0]
+    rec = L.MISSION_RECORDS + L.HF_RECORD * size
+    data[rec:rec + size] = data[L.MISSION_RECORDS + fresh_record * size:L.MISSION_RECORDS + (fresh_record + 1) * size]
+    struct.pack_into("<I", data, rec + 4 + 4 * L.HF_MARKER_SLOT, L.HF_MARKER_TIME)
+    for offset, locked in STATE_LISTS:
+        data[offset + L.HF_RECORD] = locked
+
+
 def prepare(starting_heroes: list[str], open_missions: list[str], quest_states: dict[str, int] | None = None,
-            challenge_unlocks: dict[int, tuple[int, ...]] | None = None) -> bytes:
+            challenge_unlocks: dict[int, tuple[int, ...]] | None = None, hf_playable: bool = False) -> bytes:
     """The template for one seed: its starting heroes unlocked, its first mission(s) open on the map (the live client
     keeps all of this in step once the game runs). 0.9.87: also the quests and challenges the seed opens at the start
     (the client's quest_states and challenge_unlocks), so the world map is right on its first draw instead of after a
     menu round trip: quest states at save 0xB34 + id (1 not available, 2 available), challenge records in both
     mission state lists like the story."""
     data = bytearray(template())
+    if hf_playable:
+        unclear_hyrule_field(data)
     for hero in starting_heroes:
         if hero in L.HERO_SLOTS:
             data[L.HEROES + L.HERO_SLOTS[hero] * L.HERO_SIZE + L.HERO_UNLOCKED] = 1

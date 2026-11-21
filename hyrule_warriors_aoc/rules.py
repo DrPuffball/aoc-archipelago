@@ -8,12 +8,14 @@ from worlds.generic.Rules import add_item_rule, set_rule
 from .data import BOSS_CHALLENGES, FINAL_MISSION, ITEM_RUNES, MISSION_BY_NAME, RUNE_CHALLENGES, WEAPON_BY_NAME
 from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHAMPIONS, GAME_LEVEL, challenge_gate,
                               vanilla_prerequisites)
-from .data_koroks import korok_location
+from .data_chests import CHEST_RUNES, CHEST_RUNES_ALL, DLC_CHESTS, SHARED_CHESTS, chest_location
+from .data_koroks import KOROK_RUNES, korok_location
 from .data_quest_unlocks import GAME_QUEST_PREREQS
 from .data_rewards import ALL_GROUPS, FEATURE_CHALLENGES
 from .data_quests import CHAPTER_TWO_MISSIONS, QUEST_BY_NAME
 from .items import character_item, rune_item, unlock_item
-from .data_lab import FUTURE_OF_HYRULE, LAB_BY_NAME, LAB_MISSION_CONDITION, LAB_RUNE_CONDITION, LAB_WEAPON_CONDITION
+from .data_lab import (FUTURE_OF_HYRULE, LAB_BY_NAME, LAB_MISSION_CONDITION, LAB_ROD_CONDITION, LAB_RUNE_CONDITION,
+                       LAB_WEAPON_CONDITION)
 from .locations import (challenge_bonus_location, challenge_location, lab_location, mission_location, quest_location,
                         weapon_location)
 from .options import ChallengeLogic, GameMode, Goal, MissionUnlocks, SheikahRunes, StoryParty, WeaponCheckLogic
@@ -81,6 +83,8 @@ def lab_needs(world, name: str) -> tuple[list[str], list[str]]:
     if (name in LAB_RUNE_CONDITION and world.options.sheikah_runes == SheikahRunes.option_shuffled
             and LAB_RUNE_CONDITION[name] in world.item_runes):  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
         all_of.append(rune_item(LAB_RUNE_CONDITION[name]))
+    if name in LAB_ROD_CONDITION and world.options.rod_items:
+        all_of.append(LAB_ROD_CONDITION[name])
     if name in LAB_WEAPON_CONDITION:
         hero, weapons = LAB_WEAPON_CONDITION[name]
         all_of.append(character_item(hero))
@@ -96,6 +100,16 @@ def quest_gate_open(gate: str, events: set[str]) -> bool:
         and (not any_of or any(e in events for e in any_of))
         and (not count_of or sum(e in events for e in count_of) >= count)
     )
+
+
+def rune_needs(world: AgeOfCalamityWorld, runes) -> list[str]:
+    """What logic needs for these runes: the rune item when shuffled, the clear that hands it out when vanilla, nothing
+    with start_with_all (or for a rune that is no item in this seed: Remote Bombs before 0.9.89)."""
+    if world.options.sheikah_runes == SheikahRunes.option_shuffled:
+        return [rune_item(r) for r in runes if r in world.item_runes]
+    if world.options.sheikah_runes == SheikahRunes.option_vanilla:
+        return [cleared_event(RUNE_SOURCE[r]) for r in runes]
+    return []
 
 
 def level_gate(name: str) -> str | None:
@@ -121,11 +135,7 @@ def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
         gate = challenge_gate(name, by_level, world.boss_goal)
         required = [cleared_event(gate) if gate else POST_STORY_EVENT]
     if name in RUNE_CHALLENGES:
-        rune = RUNE_CHALLENGES[name]
-        if world.options.sheikah_runes == SheikahRunes.option_shuffled and rune in world.item_runes:
-            required.append(rune_item(rune))  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
-        if world.options.sheikah_runes == SheikahRunes.option_vanilla:  # the game hands it out in that mission
-            required.append(cleared_event(RUNE_SOURCE[rune]))
+        required += rune_needs(world, [RUNE_CHALLENGES[name]])  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
     required += [quest_event(q) for q in world.challenge_quests.get(name, ())]  # the game's own quest gate
     if world.fairy_locked and name in FEATURE_CHALLENGES["Fairy Fountains"]:
         required.append("Feature: Fairy Fountains")
@@ -195,6 +205,17 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
     goal_count = world.goal_side_required
     extras = _rule(player, goal_all, count_of=world.side_counted if goal_count else (), count=goal_count)
     challenge_events = [challenge_event(c) for c in world.goal_challenge_pool]
+    if final_goal:
+        # (fuzz 2026-11-19, seed 9017: challenge_unlock_order vanilla gates the hardest challenges on The Future of
+        # Hyrule's clear, so "every challenge before The Future of Hyrule" could never be met.) Those don't count
+        # towards opening it; goal_challenges is lowered to what can (slot_data carries it to the client).
+        before = [c for c in world.goal_challenge_pool
+                  if cleared_event(FINAL_MISSION) not in challenge_requirements(world, c)]
+        if world.options.goal_challenges.value > len(before):
+            import logging
+            logging.warning("%s: goal_challenges %d lowered to %d (challenges open before The Future of Hyrule).",
+                            world.player_name, world.options.goal_challenges.value, len(before))
+            world.options.goal_challenges.value = len(before)
     challenges_needed = min(world.options.goal_challenges.value, len(challenge_events))
     quest_events = [quest_event(q) for q in sorted(world.goal_quest_pool())]
     quests_needed = min(world.options.goal_quests.value, len(quest_events))
@@ -265,8 +286,17 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
         set_rule(world.get_location(f"Event: Quest {name}"), rule)
 
     for source, kind, index in world.checked_koroks:
-        gate = cleared_event(source) if kind == "mission" else challenge_event(source)
-        set_rule(world.get_location(korok_location(source, index)), _rule(player, [gate]))
+        gate = cleared_event(source) if kind == "mission" else challenge_event(source)  # also its unlock (item)
+        needs = [gate] + rune_needs(world, KOROK_RUNES.get(source, ()))  # a rune never sits behind itself
+        set_rule(world.get_location(korok_location(source, index)), _rule(player, needs))
+    for mission, index in world.checked_chests:
+        runes = rune_needs(world, CHEST_RUNES_ALL + CHEST_RUNES.get(mission, ()))  # half-buried chests: Magnesis
+        if mission in DLC_CHESTS:  # an Expansion Pass story mission (a challenge to the world); a shared stage: either one
+            other = SHARED_CHESTS.get(mission)
+            events = [challenge_event(mission)] + ([challenge_event(other)] if other in world.active_challenges else [])
+            set_rule(world.get_location(chest_location(mission, index)), _rule(player, runes, any_of=events))
+        else:
+            set_rule(world.get_location(chest_location(mission, index)), _rule(player, [cleared_event(mission)] + runes))
 
     optimistic = world.options.weapon_check_logic == WeaponCheckLogic.option_after_character
     for name in world.checked_weapons:
@@ -274,6 +304,84 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
         gate = cleared_event(weapon.gate_mission) if (weapon.verified or optimistic) else STORY_EVENT
         needs = [gate] + ([character_item(weapon.character)] if weapon.character else [])
         set_rule(world.get_location(weapon_location(name)), _rule(player, needs))
+    set_progress_rules(world)
+
+
+def hero_level_gate(level: int) -> str:
+    """The event a hero (or weapon) level expects first: the first story mission (by its recommended level,
+    data_challenges.STORY_LEVEL) at or above that level; past the story's levels, the whole story."""
+    from .data_challenges import STORY_LEVEL
+    mission = next((m for m, lv in STORY_LEVEL.items() if lv >= level), None)
+    return cleared_event(mission) if mission else STORY_EVENT
+
+
+def story_progress_rule(world: AgeOfCalamityWorld, events: list[str], extra=()):
+    """A rule for "this far into the story" (story clear events, any one of them; STORY_EVENT = the whole story).
+    Challenges Only has no story (fuzz 2026-11-19: every progress check there was unreachable): there it is that share
+    of the seed's challenge clears instead - the gate mission's place in the vanilla story (1-20, the whole story 21)
+    out of 21, times the challenges in the seed."""
+    from .data import MISSIONS as _M
+    player = world.player
+    if world.game_mode != GameMode.option_challenges_only:
+        return _rule(player, list(extra), any_of=events)
+    order = [m.name for m in _M]
+    places = [order.index(e[len("Cleared: "):]) + 1 if e.startswith("Cleared: ") and e[len("Cleared: "):] in order
+              else len(order) + 1 for e in events] or [len(order) + 1]
+    # (scaled to the goal's challenge count, and always below it: fuzz seed 9135, goal = every challenge, put the
+    # "whole story" checks exactly at the goal, after the win)
+    goal = min(world.options.goal_challenges.value, len(world.goal_challenge_pool)) or len(world.goal_challenge_pool)
+    need = goal * min(places) // (len(order) + 2)
+    return _rule(player, list(extra), count_of=(COMPLETIONS,) if need else (), count=need)
+
+
+def gather_gate(world: AgeOfCalamityWorld, enemy: str, tier: int) -> list[str]:
+    """Events of which any one lets the logic count on meeting an enemy for a gathering tier (data_progress)."""
+    from . import data_progress as progress
+    source = progress.ENEMIES[enemy][2]
+    gates = progress.SOURCE_GATES.get(source)
+    if gates is not None:
+        mission = gates[tier - 1]
+        return [cleared_event(mission) if mission else STORY_EVENT]
+    events = [challenge_event(source)] if source in world.active_challenges else []  # a challenge built around it
+    return events + ([STORY_EVENT] if enemy in progress.ALSO_IN_STORY else [])
+
+
+def set_progress_rules(world: AgeOfCalamityWorld) -> None:
+    """0.9.90 progress checks: hero levels, weapon levels, enemies defeated, materials gathered (data_progress)."""
+    from . import data_progress as progress
+    player = world.player
+    for hero, level in world.checked_hero_levels:
+        set_rule(world.get_location(progress.hero_level_location(hero, level)),
+                 story_progress_rule(world, [hero_level_gate(level)], [character_item(hero)]))
+    fusion = ["Weapon Fusion"] if world.options.weapon_fusion else []  # (the Smithy opens with it; world: progression)
+    for hero, level in world.checked_weapon_levels:
+        needs = [character_item(hero)] + fusion
+        if level > 20:  # the game's weapon level cap is raised by these quests (their events include their items)
+            needs.append(quest_event("A Monumental Undertaking"))
+        if level > 25:
+            needs.append(quest_event("The Legendary Blacksmith"))
+        set_rule(world.get_location(progress.weapon_level_location(hero, level)),
+                 story_progress_rule(world, [hero_level_gate(level)], needs))
+    for material, tier in world.checked_gathered:
+        _, _, (kind, source) = progress.MATERIALS[material]
+        loc = world.get_location(progress.gathered_location(material, tier))
+        if kind == "missions":  # its story missions give it again on every clear: any of them, replayed
+            set_rule(loc, _rule(player, any_of=[cleared_event(m) for m in source]))
+        else:
+            set_rule(loc, _gather_rule(world, source, tier))
+    for enemy, tier in world.checked_defeated:
+        set_rule(world.get_location(progress.defeated_location(enemy, tier)), _gather_rule(world, enemy, tier))
+
+
+def _gather_rule(world: AgeOfCalamityWorld, enemy: str, tier: int):
+    """An enemy met through the story (Challenges Only: through challenge clears) or its own challenge."""
+    events = gather_gate(world, enemy, tier)
+    story = [e for e in events if e.startswith("Cleared: ") or e == STORY_EVENT]
+    if world.game_mode != GameMode.option_challenges_only or not story:
+        return _rule(world.player, any_of=events)
+    by_story = story_progress_rule(world, story)
+    own = [e for e in events if e not in story]
+    return lambda state: by_story(state) or (bool(own) and state.has_any(own, world.player))
 
 
 def apply_steady_rewards(world: AgeOfCalamityWorld) -> None:
@@ -288,7 +396,9 @@ def apply_steady_rewards(world: AgeOfCalamityWorld) -> None:
     missions = len(world.mission_order)
     if real < missions + 5:  # not enough real items of our own to keep every clear (and the fill) feasible
         return
-    for mission in world.mission_order[1:]:  # (Hyrule Field holds a locked filler: pre-cleared in the starter save)
+    for mission in world.mission_order[world.first_real_slot:]:  # (a pre-cleared Hyrule Field holds a locked filler)
+        if not world.clear_checked(mission):
+            continue  # the goal mission's clear: no check
         location = world.get_location(mission_location(mission))
         if location.progress_type == LocationProgressType.EXCLUDED:
             continue  # after the goal: filler only

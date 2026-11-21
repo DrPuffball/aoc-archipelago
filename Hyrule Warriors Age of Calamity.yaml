@@ -20,6 +20,19 @@ Hyrule Warriors Age of Calamity:
   quest_checks: true                   # map quests
   lab_checks: true                     # Royal Ancient Lab nodes (35, all open; needs include_dlc)
   weapon_checks: false                 # weapon pickups
+  korok_checks: true                   # Korok seeds (122 in story missions, 12 in challenges)
+  chest_checks: true                   # treasure chests (153 in story missions, 28 more with include_dlc)
+  hero_level_checks: false             # a check per hero every N levels (Hero Level: Link Lv 20)
+  hero_level_check_max: 50             # highest level with a check (2-100)
+  hero_level_check_interval: 10        # levels between checks (1-50)
+  weapon_level_checks: false           # a check per hero when their best weapon reaches every N levels
+  weapon_level_check_max: 20           # highest weapon level with a check (2-30; the game caps weapons at 30)
+  weapon_level_check_interval: 5       # levels between checks (1-29)
+  enemy_defeat_checks: false           # enough of an enemy type defeated (trophies earned in total)
+  enemy_defeat_scale: 100              # percent applied to every enemy count (10-400)
+  material_checks: false               # enough of a material gathered in total
+  material_scale: 100                  # percent applied to every material count (10-400)
+  gathering_check_tiers: 2             # checks per material / enemy type (1-3 rising counts)
   side_check_density: 100              # % of quests and challenges that hold checks (5-100)
   region_hope_checks: false            # "The Hope of <region>" (100% of a region)
   difficulty_checks: off               # off | normal | hard | very_hard: one more check per mission for each harder difficulty
@@ -57,8 +70,10 @@ Hyrule Warriors Age of Calamity:
 
   # --- Locked features ---
   weapon_fusion: false                 # false = the Smithy is open from the start; true = it opens with the Weapon Fusion item
-  frame_rate: fps_30                   # fps_30 (the game's own) | experimental: fps_60 | fps_120 | unlimited (game speed stays real time) | off
+  frame_rate: off                      # off (the game's own 30) | experimental: fps_60 | fps_120 | unlimited (game speed stays real time)
   sheikah_runes: shuffled              # shuffled (all four runes are items; uses the game mod) | start_with_all | vanilla
+  rod_items: true                      # Fire, Ice and Lightning Rod are items; a rod stays hidden until found
+  apple_items: false                   # healing apples are an item; hidden in missions until found
   locked_features: [Terrako Guardian, Fairy Fountains]  # any of: Cooking, Shops, Fairy Fountains, Terrako Guardian
 
   # --- Upgrade items ---
@@ -86,8 +101,9 @@ Hyrule Warriors Age of Calamity:
   mission_rewards: vanilla             # vanilla | shuffled (each mission gives another's rewards) | none
 
   # --- Hints and help ---
-  hint_mission_unlocks: true           # free hints for every mission unlock item
-  hint_heroes: true                    # free hints for every hero
+  hint_mission_unlocks: false          # free hints for every mission unlock item
+  hint_heroes: false                   # free hints for every hero
+  hint_runes: true                     # free hints for the four runes (with sheikah_runes: shuffled)
   mission_hint_every: 0                # free hint every N story clears (0 = off)
   stuck_rescue_minutes: 30             # a hint after this many minutes without a new check (0 = off)
   goal_banner: true                    # goal progress banner at the top of the emulator while on the map

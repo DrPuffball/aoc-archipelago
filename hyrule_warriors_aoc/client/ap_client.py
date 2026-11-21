@@ -20,6 +20,7 @@ from CommonClient import (
     logger,
     server_loop,
 )
+from MultiServer import mark_raw
 from NetUtils import ClientStatus
 
 from ..data import GAME_NAME
@@ -49,6 +50,7 @@ STARTER_NOTE = ("This seed skips the forced first mission, but the starter save 
                 "and you then pick Continue. Type /starter_save to force it.")
 
 EMULATOR_BOOT_SECONDS = 90  # an emulator younger than this may be booting the game: never switch saves
+MAP_REFRESH_GAP = 3.0  # seconds between two automatic world-map redraws
 REFRESH_HINT_SECONDS = 20  # how long the "pause and go back to the map" banner stays after a new seed's setup
 FLOW_PAUSED = 0x60  # mission flow state of the pause menu
 DEATH_HOLD_SECONDS = 0.1  # how often a received death re-zeroes the party's health
@@ -72,7 +74,7 @@ class AoCCommandProcessor(ClientCommandProcessor):
         elif not ctx.bridge.connected:
             self.output("Game NOT connected. Start Age of Calamity in Ryujinx or Eden (only one open) and load your "
                         "save; the client attaches by itself within a few seconds (Windows; Ryujinx: memory mode "
-                        "'Software'; Eden: CPU accuracy Auto).")
+                        "'Software'; Eden: CPU accuracy Unsafe or Auto).")
         elif not ctx.session:
             self.output("Hook connected, but you are not connected to a multiworld slot yet.")
         else:
@@ -89,25 +91,39 @@ class AoCCommandProcessor(ClientCommandProcessor):
             self.output(f"Available: {', '.join(s.available_missions()) or 'none'}")
 
 
-    def _cmd_ryujinx_folder(self, folder: str = "") -> None:
-        """Tell the client where Ryujinx keeps its data, when it can't find your save by itself (in Ryujinx:
-        File > Open Ryujinx Folder; the folder that contains "bis"). Without a folder: show where it looks."""
+    @mark_raw  # (the rest of the line as typed: a Windows path keeps its backslashes and spaces)
+    def _cmd_emulator_folder(self, folder: str = "") -> None:
+        """Tell the client where Ryujinx or Eden keeps its data, when it can't find your save by itself: the folder
+        the emulator's File menu opens (Ryujinx: File > Open Ryujinx Folder, the one with "bis"; Eden: its user folder,
+        the one with "nand"). The client tells which emulator it is. Without a folder: show where it looks."""
         import os
-        from .savewatch import find_save_files, ryujinx_data_roots
+        from .savewatch import eden_data_roots, find_save_files, ryujinx_data_roots
         from .settings import save_setting
         ctx = self.ctx
         if folder:
             folder = folder.strip().strip('"')
-            if not os.path.isdir(os.path.join(folder, "bis", "user", "save")):
-                self.output(f"{folder} has no bis/user/save folder: pick the folder Ryujinx opens with "
-                            "File > Open Ryujinx Folder.")
+            if os.path.isdir(os.path.join(folder, "bis", "user", "save")):
+                save_setting("ryujinx_folder", folder)
+                self.output(f"Ryujinx folder set: {folder}")
+            elif os.path.isdir(os.path.join(folder, "nand")):
+                save_setting("eden_folder", folder)
+                self.output(f"Eden folder set: {folder}")
+            else:
+                self.output(f"{folder} is neither a Ryujinx folder (with bis/user/save) nor an Eden user folder (with "
+                            "nand): pick the folder the emulator's File menu opens (Ryujinx: Open Ryujinx Folder; "
+                            "Eden: its Open folder entry).")
                 return
-            save_setting("ryujinx_folder", folder)
             ctx.save_path = None
             ctx._find_save_path()
         self.output("Looking for Ryujinx data in: " + (", ".join(ryujinx_data_roots()) or "nothing found"))
+        self.output("Looking for Eden data in: " + (", ".join(eden_data_roots()) or "nothing found"))
         found = find_save_files()
         self.output("Age of Calamity saves: " + (", ".join(found) or "none"))
+
+    @mark_raw
+    def _cmd_ryujinx_folder(self, folder: str = "") -> None:
+        """The older name of /emulator_folder (works for Ryujinx and Eden)."""
+        self._cmd_emulator_folder(folder)
 
     def _cmd_sync_saves(self, mode: str = "") -> None:
         """Copy this seed's newest save to the other emulator (Ryujinx <-> Eden) now; the client also does it by itself
@@ -156,22 +172,65 @@ class AoCCommandProcessor(ClientCommandProcessor):
         self.output("Goal banner: " + ("on" if self.ctx.banner_on() else "off")
                     + (" (your YAML's setting)" if self.ctx.banner_pref is None else " (set with /goal_banner)"))
 
+    def _cmd_deathlink(self, state: str = "") -> None:
+        """DeathLink: when anyone linked dies, you die too (and they do when you die in a mission). "/deathlink on" or
+        "/deathlink off" (remembered on this PC, takes effect at once); "/deathlink seed" follows your YAML's
+        death_link again. "/deathlink" shows whether it is on."""
+        from .settings import load_settings, save_setting
+        state = state.lower()
+        if state in ("on", "off", "seed"):
+            save_setting("death_link", None if state == "seed" else state == "on")
+            self.ctx.deathlink_pref = load_settings().get("death_link")
+            if not self.ctx.deathlink_on():
+                self.ctx._pending_kill = None  # (a death received just before switching it off is dropped)
+            if self.ctx.server and self.ctx.server.socket:
+                asyncio.create_task(self.ctx.update_death_link(self.ctx.deathlink_on()), name="death link tag")
+        self.output("DeathLink: " + ("on" if self.ctx.deathlink_on() else "off")
+                    + (" (your YAML's setting)" if self.ctx.deathlink_pref is None else " (set with /deathlink)"))
+
     def _cmd_fps(self, mode: str = "") -> None:
         """The game's frame rate in gameplay, with the game always at real-time speed: "/fps 60", "/fps 120",
-        "/fps unlimited", "/fps 30" (the game's own), "/fps off" (left alone), "/fps seed" (your YAML's frame_rate).
+        "/fps unlimited", "/fps off" (the game's own 30, left alone), "/fps seed" (your YAML's frame_rate).
         Remembered on this PC. Cutscenes, menus and the world map stay at the game's own 30. "/fps" shows the mode."""
         from .settings import save_setting
         mode = mode.lower()
-        if mode in ("60", "30", "120", "unlimited", "off", "seed"):
+        if mode == "30":
+            mode = "off"  # (0.9.90: merged; still understood)
+        if mode in ("60", "120", "unlimited", "off", "seed"):
             save_setting("frame_rate", None if mode == "seed" else mode)
             self.ctx.apply_frame_rate_mode()
         elif mode:
-            self.output("Use /fps 30, /fps 60, /fps 120, /fps unlimited, /fps off or /fps seed.")
+            self.output("Use /fps 60, /fps 120, /fps unlimited, /fps off or /fps seed.")
         pacer = self.ctx.pacer
         self.output("Frame rate: " + {"60": "up to 60 FPS", "120": "up to 120 FPS", "unlimited": "unlimited",
-                                      "30": "30 FPS (the game's own)", "off": "left to the game"}[pacer.mode]
+                                      "off": "the game's own 30 FPS (left alone)"}[pacer.mode]
                     + (" in gameplay, game speed kept at real time" if pacer.mode in ("60", "120", "unlimited") else "")
                     + (" (set with /fps)" if self.ctx.fps_pref else " (your YAML's frame_rate)"))
+
+    def _cmd_fps_cutscenes(self, mode: str = "") -> None:
+        """Experimental: keep the /fps frame rate in the pause menu too, at most 60 ("/fps_cutscenes on"), instead of
+        the game's own 30 there ("/fps_cutscenes off", the default). Story and video cutscenes always stay at 30.
+        Remembered on this PC."""
+        from .settings import load_settings, save_setting
+        mode = mode.lower()
+        if mode in ("on", "off"):
+            save_setting("fps_cutscenes", mode == "on")
+            self.ctx.pacer.pace_cutscenes = mode == "on"
+        elif mode:
+            self.output("Use /fps_cutscenes on or /fps_cutscenes off.")
+        on = bool(load_settings().get("fps_cutscenes"))
+        self.output("Pause menu frame rate: " + ("the /fps rate, at most 60 (experimental)" if on else "the game's own 30"))
+
+    def _cmd_gathered(self) -> None:
+        """Material and enemy checks: what you have gathered or defeated in total so far, and the next count each
+        needs (totals count everything you gained since this seed first connected; spending doesn't lower them)."""
+        from .progress import GatherTally, summary
+        s, d = self.ctx.session, self.ctx.delivery
+        if not s:
+            self.output("Connect to a seed first.")
+            return
+        for line in summary(s.ids, s.gather_counts, GatherTally(d.state) if d else None):
+            self.output(line)
 
     def _cmd_accept_save(self) -> None:
         """Send clears the client held back because the save showed many clears the server had never seen (or would
@@ -275,22 +334,32 @@ class AoCContext(CommonContext):
         self._below_goal: set[str] | None = None  # goal_difficulty: clears below it (announced once each)
         self._hero_waits_told: set[str] = set()  # open missions told to wait for their forced heroes (once each)
         self._refresh_hint = False  # a starter save went in: ask for one map refresh once the game is on the map
+        self._map_refresh_due, self._map_refreshed = False, 0.0  # live world-map redraw (live_hook.refresh_map)
         self._refresh_until: float | None = None
         # A short instruction for the banner (user, 2026-11-02: "keep elaborating on it where it could apply"): shown on
         # the map in place of the goal line until it expires, whatever /goal_banner says (it is what to do next).
         self._banner_tip: tuple[str, float] | None = None
         from .settings import load_settings
         self.banner_pref: bool | None = load_settings().get("goal_banner")  # /goal_banner; None = the seed's option
+        # /deathlink (user, 2026-11-21: on/off from the client, not only the YAML); None = the seed's death_link
+        self.deathlink_pref: bool | None = load_settings().get("death_link")
         from .framerate import MODES, Pacer
         self.fps_pref: str | None = load_settings().get("frame_rate")  # /fps; None = the seed's frame_rate
         if self.fps_pref not in MODES:
             self.fps_pref = None  # (an older client's "auto")
+        elif self.fps_pref == "30":
+            self.fps_pref = "off"  # (0.9.90: merged)
 
         def _pacer_game():
             from .live_hook import LiveGame
             return LiveGame.find() if sys.platform == "win32" else None
         self.pacer = Pacer(_pacer_game, self.fps_pref or "60")  # frame rate (client/framerate.py), own thread
+        self.pacer.pace_cutscenes = bool(load_settings().get("fps_cutscenes"))  # /fps_cutscenes (experimental)
+        # (/fps_map removed for 0.9.92, user 2026-11-21: starting a mission from a paced world map soft-locked
+        # before the loading screen; the map stays at the game's own 30 until that is fixed)
+        self.pacer.pace_map = False
         self._fps_cheat_checked = False
+        self._progress_at, self._progress_last = 0.0, None  # (progress checks: read every few seconds)
         self._held: list[dict] = []  # clears held back by the goal guard (_hold_batch) until /accept_save
         self._hold_noted = False
         self._save_polled = False
@@ -371,8 +440,8 @@ class AoCContext(CommonContext):
                 from .savewatch import ryujinx_data_roots
                 from .savewatch import eden_data_roots
                 logger.warning("No Age of Calamity save found (looked in: %s). Start the game once in Ryujinx or Eden. "
-                               "If Ryujinx keeps its data somewhere else, type /ryujinx_folder <folder> (in Ryujinx: "
-                               "File > Open Ryujinx Folder shows it).",
+                               "If the emulator keeps its data somewhere else, use Pick emulator folder… in the "
+                               "Options tab, or type /emulator_folder <folder> (the emulator's File menu opens it).",
                                ", ".join(ryujinx_data_roots() + eden_data_roots()) or "no emulator folder")
 
     def _ensure_delivery(self) -> bool:
@@ -413,7 +482,8 @@ class AoCContext(CommonContext):
         logger.info("New Game detected: everything you received will be given again.")
 
     def _start_save_link(self) -> None:
-        from .savefile import SaveFormatError, check_save, cleared_missions, completed_quests, owned_weapons
+        from .savefile import (SaveFormatError, check_save, cleared_missions, completed_quests, found_koroks,
+                               opened_chests, owned_weapons)
         from .savewatch import SaveWatcher
 
         if not (self.save_path and self._ensure_delivery()):
@@ -425,7 +495,8 @@ class AoCContext(CommonContext):
         except (OSError, SaveFormatError) as e:
             logger.warning("Cannot use save file %s: %s", self.save_path, e)
             return
-        ignore = self.delivery.baseline(cleared_missions(data) | completed_quests(data) | owned_weapons(data))
+        ignore = self.delivery.baseline(cleared_missions(data) | completed_quests(data) | owned_weapons(data)
+                                        | found_koroks(data) | opened_chests(data))
         self.save_watcher = SaveWatcher(self.save_path, ignore=ignore, on_ignore_change=self.delivery.set_baseline)
         # (a starter save's clears are expected; another seed's save is about to be swapped for one)
         if ignore and self.save_path not in self.delivery.state.get("starter", {}) and not self.save_belongs_elsewhere():
@@ -473,6 +544,8 @@ class AoCContext(CommonContext):
                 logger.debug("hook attach failed: %s", e)
                 self.live = None
                 self._rune_mod_noted = None
+            if self.live is not None:
+                self.pacer.reattach()  # (its own handle may be stale after a reload: find the game again too)
             if self.live is None:
                 self.overlay.set_banner(None)
                 self._warn_unreadable(now)
@@ -491,7 +564,8 @@ class AoCContext(CommonContext):
         try:
             cleared = self._counted_clears() | self.live.completed_quests()
             self.session.game_done = set(cleared)  # random side unlocks open by this count
-            if not self._first_mission_noted and FIRST_MISSION not in cleared and not self.session.cleared_missions:
+            if (not self._first_mission_noted and FIRST_MISSION not in cleared and not self.session.cleared_missions
+                    and not self.session.hf_shuffled):  # (shuffled: Hyrule Field is uncleared on purpose)
                 self._first_mission_noted = True
                 if not self.session.starter_save:  # seeds before 0.9.54
                     logger.info(FIRST_MISSION_NOTE)
@@ -503,6 +577,12 @@ class AoCContext(CommonContext):
             # Weapons count as found once the player owns more copies than Archipelago handed out.
             given = self.delivery.state.get("weapons_given", {})
             cleared |= {n for n, c in self.live.weapon_counts().items() if c > given.get(n, 0)}
+            if self.session.ids["korok"]:
+                cleared |= self.live.found_koroks()
+            if self.session.ids["chest"]:
+                cleared |= self.live.opened_chests()
+            if self.session.has_progress_checks:
+                cleared |= self._progress_reached(now)
             self.delivery.baseline(cleared)  # first contact with this seed: what was already cleared never counts
             self._shrink_baseline(cleared, now)
             if self._shrink_seen is not None:
@@ -570,6 +650,7 @@ class AoCContext(CommonContext):
             states = self.session.quest_states()
             if quests := self.live.set_quest_states(states):
                 probe_logger.info("Services (quest states) set from received items: %s", ", ".join(quests))
+                self._map_refresh_due = True  # (quest icons, the Smithy, the Training Camp: redrawn below)
             done = {q for q, state in states.items() if state == 3} - self.session.store_quests()
             if quests := self.live.set_quest_effects(done):
                 probe_logger.info("Quest effects set in game: %s", ", ".join(quests))
@@ -599,7 +680,7 @@ class AoCContext(CommonContext):
                                 len(done & self.session.goal_challenge_pool), self.session.goal_challenges)
                     await self._maybe_finish()
                 self._warn_below_goal(done)
-            if self.session.death_link:
+            if self.deathlink_on():
                 await self._death_link_tick()
             self._frame_rate_tick()
             mod = self.live.rune_mod_active()
@@ -622,6 +703,18 @@ class AoCContext(CommonContext):
             # Road to the Ancient Lab (record 2) is where the story hands out Magnesis and Stasis: left alone the same way
             # [guess: its script may wait for them like Hyrule Field's].
             in_battle = bool(self.live._battle_character())
+            if (rod_locks := self.session.rod_locks()) is not None:
+                if self.session.rod_items or self.session.apple_items:  # 0.9.92: the palette slots themselves
+                    # (shown from the next mission on; an item whose option is off is left to the game)
+                    wanted = [None if not on else not lock for lock, on in zip(
+                        rod_locks, [self.session.rod_items] * 3 + [self.session.apple_items])]
+                    try:
+                        if changed := self.live.set_rod_flags(wanted):
+                            probe_logger.info("Rods: %s", ", ".join(changed))
+                    except HookError as e:
+                        logger.debug("rod flags: %s", e)
+                if in_battle and (changed := self.live.hold_rods(rod_locks)):  # (a rod picked up mid-mission)
+                    probe_logger.info("Rods: %s", ", ".join(changed))
             if runes and in_battle and (self.live.map_selection() or (0, 0))[:2] in ((1, 2), (2, 2)):
                 runes = {}
             if runes and (changed := self.live.set_runes(runes)):
@@ -640,7 +733,7 @@ class AoCContext(CommonContext):
                 probe_logger.info("Rune lock: Road to the Ancient Lab %s", "held open" if hold else "cleared again")
             # The game's own unlock rules follow the multiworld: only missions the seed has opened can be started.
             opened = cleared | self.session.cleared_missions | set(self.session.available_missions())
-            self.live.set_mission_states(opened)  # the map shows the change the next time it is opened
+            map_changed = bool(self.live.set_mission_states(opened))
             if self.live.set_mission_locks(opened):
                 new_open = sorted(set(self.session.available_missions()) - self._open_logged)
                 if new_open:
@@ -662,10 +755,21 @@ class AoCContext(CommonContext):
                 self.overlay.show(f"{name}: waits for {', '.join(waiting[name])}")
                 self._tip(f"{name} opens once you have {' and '.join(waiting[name])}")
             self._hero_waits_told |= set(waiting)
-            if self.live.set_challenge_locks(self.session.challenge_unlocks()) and not self._challenges_logged:
-                self._challenges_logged = True
-                probe_logger.info("Challenges now open by the seed's rules (%s), not the vanilla order.",
-                            "random, by completions" if self.session.side_random else "challenge_logic")
+            if self.live.set_challenge_locks(self.session.challenge_unlocks()):
+                map_changed = True
+                if not self._challenges_logged:
+                    self._challenges_logged = True
+                    probe_logger.info("Challenges now open by the seed's rules (%s), not the vanilla order.",
+                                      "random, by completions" if self.session.side_random else "challenge_logic")
+            # Redraw the world map at once (2026-11-19: no more pausing to see what opened); retried each tick until the
+            # map is idle, at most every few seconds.
+            if map_changed:
+                self._map_refresh_due = True
+            if (self._map_refresh_due and not in_battle  # (refresh_map waits for the Map tab itself)
+                    and time.monotonic() - self._map_refreshed > MAP_REFRESH_GAP):
+                if self.live.refresh_map():
+                    self._map_refresh_due, self._map_refreshed = False, time.monotonic()
+                    probe_logger.info("World map redrawn (new icons shown without pausing).")
         except (HookError, OSError) as e:
             logger.info("Lost the connection to the game (%s); reconnecting when it is back.", e)
             if self.probe and self.probe.enabled:
@@ -721,7 +825,12 @@ class AoCContext(CommonContext):
             self._pending_kill = None  # (user rule) a death outside a mission would only kill the next mission's start
         if self._pending_kill and hp is not None and hp > 0:
             if self.live.kill_player():
-                logger.info("DeathLink: %s died. Your health is at 0: the next hit defeats you.", self._pending_kill)
+                if getattr(self.live, "instant_kill", False):
+                    logger.info("DeathLink: %s died, and so did you.", self._pending_kill)
+                else:  # (an older game mod: no DeathLink hook)
+                    logger.info("DeathLink: %s died. Your health is at 0: the next hit defeats you. (Close the "
+                                "emulator once so the client can update the game mod: then a DeathLink defeats you "
+                                "at once.)", self._pending_kill)
                 self.overlay.show(f"DeathLink: {self._pending_kill} died")
                 self._audit({"finding": "deathlink", "direction": "applied", "source": self._pending_kill, "hp_was": hp})
                 self._death_hold_source = self._pending_kill
@@ -864,7 +973,9 @@ class AoCContext(CommonContext):
         if not lock:
             cleared = set(any_clear)
         else:
-            cleared = self.live.cleared_missions_at(lock) | ({FIRST_MISSION} & any_clear)
+            cleared = self.live.cleared_missions_at(lock)
+            if not self.session.hf_shuffled:  # (a pre-cleared Hyrule Field counts at any difficulty)
+                cleared |= {FIRST_MISSION} & any_clear
             too_easy = any_clear - cleared
             if self._too_easy is not None:
                 for name in sorted(too_easy - self._too_easy):
@@ -986,7 +1097,7 @@ class AoCContext(CommonContext):
         elif cmd == "Connected":
             self.session = Session(args["slot_data"])
             self.apply_frame_rate_mode()
-            asyncio.create_task(self.update_death_link(self.session.death_link), name="death link tag")
+            asyncio.create_task(self.update_death_link(self.deathlink_on()), name="death link tag")
             self.session.note_activity(time.time())
             if self.session.world_version != WORLD_VERSION:
                 logger.warning(
@@ -1027,7 +1138,7 @@ class AoCContext(CommonContext):
     def on_deathlink(self, data: dict[str, Any]) -> None:
         """A linked player died: tell the game to kill the player."""
         super().on_deathlink(data)
-        if self.session and self.session.death_link:
+        if self.session and self.deathlink_on():
             self._pending_kill = data.get("source", "someone")  # applied in the next ticks if you are in a mission
             self._pending_kill_at = time.monotonic()
             self._audit({"finding": "deathlink", "direction": "received", "source": self._pending_kill})
@@ -1230,10 +1341,14 @@ class AoCContext(CommonContext):
             location_id = self.session.on_quest_completed(str(message.get("quest")))
         elif kind == "korok_found":
             location_id = self.session.on_korok_found(str(message.get("korok")))
+        elif kind == "chest_opened":
+            location_id = self.session.on_chest_opened(str(message.get("chest")))
+        elif kind == "progress_reached":
+            location_id = self.session.on_progress(str(message.get("kind")), str(message.get("name")))
         elif kind == "lab_node":
             location_id = self.session.on_lab_node(str(message.get("name")))
         elif kind == "player_died":
-            if self.session.death_link:
+            if self.deathlink_on():
                 await self.send_death(f"{self.player_names.get(self.slot, 'A hero')} fell in Hyrule")
                 self._audit({"finding": "deathlink", "direction": "sent"})
             return
@@ -1244,7 +1359,7 @@ class AoCContext(CommonContext):
             logger.debug("Ignoring unknown game message: %r", message)
             return
 
-        source = next((str(message.get(k)) for k in ("mission", "weapon", "challenge", "quest", "korok", "name")
+        source = next((str(message.get(k)) for k in ("mission", "weapon", "challenge", "quest", "korok", "chest", "name")
                        if k in message), "")
         if location_id is None and source not in self._no_check_noted:  # (once each: thousands piled up per week)
             self._no_check_noted.add(source)
@@ -1278,6 +1393,8 @@ class AoCContext(CommonContext):
         self.fps_pref = load_settings().get("frame_rate")
         if self.fps_pref not in MODES:
             self.fps_pref = None
+        elif self.fps_pref == "30":
+            self.fps_pref = "off"  # (0.9.90: merged)
         self.pacer.set_mode(self.fps_pref or (self.session.frame_rate if self.session else "60"))
 
     def _frame_rate_tick(self) -> None:
@@ -1292,6 +1409,37 @@ class AoCContext(CommonContext):
                 logger.warning("A frame-rate cheat is installed (%s). It fights the client's frame rate control: turn "
                                "the cheat off in the emulator, or type /fps off to leave the frame rate to it.",
                                ", ".join(found))
+
+    def _progress_reached(self, now: float) -> set[str]:
+        """Hero/weapon levels and gathering totals reached (client/progress.py), read every 3 s; the totals live in the
+        seed's ledger. Only received heroes count (others are kept at level 1 anyway)."""
+        from .progress import GatherTally, reached
+        if now < self._progress_at and self._progress_last is not None:
+            return self._progress_last
+        self._progress_at = now + 3
+        s = self.session
+        heroes = sorted(s.unlocked_characters)
+        hero_levels = {h: self.live.hero_level(h) for h in heroes} if s.ids["hero_level"] else {}
+        weapon_levels = self.live.best_weapon_levels(heroes) if s.ids["weapon_level"] else {}
+        tally = None
+        if s.ids["gathered"] or s.ids["defeated"]:
+            tally = GatherTally(self.delivery.state)
+            if tally.update(self.live.material_counts(), self.live.material_writes):
+                self.delivery.save_state()
+        self._progress_last = reached(s.ids, s.gather_counts, hero_levels, weapon_levels, tally)
+        return self._progress_last
+
+    def _install_mod_now(self) -> bool:
+        """Install the game mod at once (the game is closed); True when it is in place (0.9.90: a shuffled Hyrule
+        Field's starter save must never boot without its forced-opening patch)."""
+        from . import rune_mod
+        try:
+            rune_mod.remove_old()
+            rune_mod.install()
+        except OSError as e:
+            logger.warning("Couldn't install the Archipelago game mod: %s", e)
+            return False
+        return True
 
     def maybe_install_rune_mod(self) -> None:
         """Put the rune mod (client/rune_mod.py) into Eden's and Ryujinx's mod folders while no emulator runs (it is
@@ -1493,8 +1641,12 @@ class AoCContext(CommonContext):
             except Exception as e:  # never let this extra stop the install
                 logger.debug("starter save extras: %s", e)
                 quests, challenges, extras_ok = {}, {}, False
+            if self.session.hf_shuffled and not self._install_mod_now():
+                logger.warning("Save not changed: this seed needs the Archipelago game mod (it stops the game from "
+                               "forcing The Battle of Hyrule Field at the start), and it couldn't be installed.")
+                return
             data = starter_save.prepare(sorted(self.session.unlocked_characters), self.session.available_missions(),
-                                        quests, challenges)
+                                        quests, challenges, hf_playable=self.session.hf_shuffled)
             starter_save.install(path, save_copies(path), data, STATE_DIR / "backups")
             self.delivery.new_game(set())  # a fresh save: every received item is given again
             from .savefile import owned_weapons
@@ -1505,13 +1657,20 @@ class AoCContext(CommonContext):
             self._refresh_hint = not extras_ok
             logger.info("Starter save installed (%s). Start Age of Calamity and pick Continue: the forced first mission "
                         "is skipped; play %s with your starting heroes.", why,
-                        " or ".join(m for m in self.session.available_missions() if m != FIRST_MISSION)
+                        " or ".join(m for m in self.session.available_missions()
+                                    if m != FIRST_MISSION or self.session.hf_shuffled)
                         or "your first mission")
         self.delivery.state.setdefault("starter", {})[path] = time.time()
         self.delivery.save_state()
         shelf.set_owner(path, me)
         self._starter_reason = None
         self.set_save_path(path)  # watch the new save from scratch
+
+    def deathlink_on(self) -> bool:
+        """DeathLink in use: /deathlink (remembered on this PC) or else the seed's death_link."""
+        if self.deathlink_pref is not None:
+            return bool(self.deathlink_pref)
+        return bool(self.session and self.session.death_link)
 
     def banner_on(self) -> bool:
         if self.banner_pref is not None:
@@ -1528,11 +1687,18 @@ class AoCContext(CommonContext):
         hold = getattr(self, "_death_hold_source", None) if getattr(self, "_death_hold", False) else None
         flow = self.live._flow() if in_battle else None
         waiting = flow and flow[1] == FLOW_PAUSED and getattr(self, "_pending_kill", None)
+        if hold and getattr(self.live, "instant_kill", False):
+            hold = None  # (the game mod's hook defeats you at once: nothing to tell)
         if hold or waiting:  # (what to do next, whatever /goal_banner says)
             self.overlay.set_banner(f"DeathLink from {hold}: your next hit defeats you (healing won't help)" if hold
                                     else f"DeathLink from {self._pending_kill}: it lands when you unpause")
             return
         if self._refresh_hint and not in_battle:  # a new seed's first visit: the map was drawn before the client's setup
+            if self.live.refresh_map():
+                # (redrawn for the player: the note is only a fallback)
+                self._refresh_hint = False
+                probe_logger.info("New seed set up: world map redrawn.")
+                return
             if self._refresh_until is None:
                 self._refresh_until = time.monotonic() + REFRESH_HINT_SECONDS
                 logger.info("New seed set up: open the pause menu and go back to the map once, so the Smithy, the "
@@ -1617,7 +1783,7 @@ class AoCContext(CommonContext):
             self._unreadable_warned = True
             logger.warning("An emulator is running Age of Calamity but the client can't read the game. Check: (1) "
                            "Ryujinx: Options > Settings > System > Memory Manager Mode = Software (then restart the "
-                           "game); Eden: CPU accuracy Auto; (2) the game is version 1.4.1 (the window title shows "
+                           "game); Eden: CPU accuracy Unsafe or Auto; (2) the game is version 1.4.1 (the window title shows "
                            "it); (3) a save is loaded (pick Continue). Tested on Ryujinx 1.3.3 and Eden 0.2.1.")
             self.overlay.show("Client can't read the game: see the client window")
 
@@ -1630,7 +1796,7 @@ class AoCContext(CommonContext):
 
     async def shutdown(self) -> None:
         self.overlay.enabled = False
-        self.pacer.stop()  # (its thread puts the game's own 30 FPS back)
+        self.pacer.stop(wait=2.0)  # (its thread puts the game's own 30 FPS back before the client exits)
         await self.bridge.stop()
         await super().shutdown()
 
@@ -1641,8 +1807,40 @@ class AoCContext(CommonContext):
 
         class AoCManager(ui):
             base_title = "Archipelago Age of Calamity Client"
-            if load_settings().get("research_probe"):  # its own tab, so research lines don't bury the game's
-                logging_pairs = [("Client", "Archipelago"), (PROBE_LOGGER, "Game Research")]
+
+            def build(self):
+                container = super().build()
+                try:
+                    from .options_tab import build_options_tab
+                    self.add_client_tab("Options", build_options_tab(self))  # the / commands as buttons and toggles
+                except Exception:  # (the client still works without the tab)
+                    logging.getLogger("Client").exception("Options tab could not be built")
+                # Game Research: its own tab, so research lines don't bury the game's; furthest right and only while
+                # research is on (user, 2026-11-18), following /research and the Options tab without a restart.
+                from kivy.clock import Clock
+                from kvui import UILog
+                self.aoc_research_log = UILog(probe_logger)
+                self.aoc_research_tab = None
+                self.aoc_sync_research_tab()
+                Clock.schedule_interval(self.aoc_sync_research_tab, 0.5)
+                return container
+
+            def aoc_sync_research_tab(self, _dt=None) -> None:
+                try:
+                    on = bool(load_settings().get("research_probe"))
+                    if on and self.aoc_research_tab is None:
+                        log = self.aoc_research_log
+                        if log.parent is not None:  # (still on the screen of the last time it was shown)
+                            log.parent.remove_widget(log)
+                        self.aoc_research_tab = self.add_client_tab("Game Research", log)
+                    elif not on and self.aoc_research_tab is not None:
+                        self.remove_client_tab(self.aoc_research_tab)
+                        self.aoc_research_tab = None
+                        names = getattr(self.screens, "local_screen_names", [])  # (kvui keeps removed names)
+                        while "Game Research" in names:
+                            names.remove("Game Research")
+                except Exception as e:  # (never in the way of the client)
+                    logging.getLogger("Client").debug("Game Research tab: %s", e)
 
         return AoCManager
 

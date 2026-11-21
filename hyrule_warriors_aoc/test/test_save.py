@@ -961,6 +961,7 @@ class DeathLinkHookTests(unittest.TestCase):
         self.assertAlmostEqual(game.player_hp(), 1900.0)  # the real HP wins
         fake.put(holder + H.FLOW_STATE, struct.pack("<I", 0x5400))  # mission flow: playing, nothing requested
         self.assertTrue(game.kill_player())
+        self.assertFalse(game.instant_kill)  # (no game mod hook: the next hit is the KO)
         self.assertEqual(game.player_hp(), 0.0)
         self.assertEqual(struct.unpack("<f", fake.read(record + H.UNIT_HP, 4))[0], 0.0)
         self.assertEqual(struct.unpack("<f", fake.read(char + H.CHAR_HP, 4))[0], 0.0)
@@ -985,6 +986,13 @@ class DeathLinkHookTests(unittest.TestCase):
         self.assertEqual(struct.unpack("<f", fake.read(char + H.CHAR_HP, 4))[0], 0.0)
         fake.put(holder + H.FLOW_CLOCK, struct.pack("<I", 20))  # restarted from the pause menu: the clock went back
         self.assertFalse(game.hold_death())
+        from ..client.rune_mod import DEATHLINK_HOOK, DEATHLINK_HOOK_CODE, DEATHLINK_REQUEST
+        fake.put(H.MODULE_BASE + DEATHLINK_HOOK, DEATHLINK_HOOK_CODE)  # game mod 0.9.91: the game defeats you itself
+        fake.put(record + H.UNIT_HP, struct.pack("<f", 1900.0))
+        self.assertTrue(game.kill_player())
+        self.assertTrue(game.instant_kill)
+        self.assertEqual(struct.unpack("<I", fake.read(H.MODULE_BASE + DEATHLINK_REQUEST, 4))[0], 2)  # unit 1, + 1
+        self.assertEqual(struct.unpack("<f", fake.read(record + H.UNIT_HP, 4))[0], 0.0)
         fake.put(char + H.CHAR_HP, struct.pack("<f", 0.0))
         fake.put(record + H.UNIT_HP, struct.pack("<f", 0.0))
         fake.put(record + H.UNIT_HP, struct.pack("<f", 1900.0))

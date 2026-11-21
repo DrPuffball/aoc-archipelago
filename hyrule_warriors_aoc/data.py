@@ -352,6 +352,15 @@ RUNES = ["Remote Bombs", "Cryonis", "Magnesis", "Stasis"]
 ITEM_RUNES = ["Cryonis", "Magnesis", "Stasis"]
 MOD_ITEM_RUNES = list(RUNES)  # 0.9.89+ (rune mod): all four are items, Remote Bombs included (the Slate stays usable)
 ENFORCED_RUNES = ["Magnesis", "Stasis"]  # what seeds before 0.9.58 enforce (their Bombs/Cryonis items were logic only)
+# Elemental rods (0.9.92, order = item ids, append only): the item palette (hold L) has Fire on Y, Ice on X, Lightning
+# on A. In a mission the uses left are u32s at [[[module + 0x2B63708] + 0x30] + 0x3C8] + 0x910 + 4 * slot; held at 0
+# the rod is greyed out and L + its button does nothing [confirmed on Eden 2026-11-19]. The save keeps the start count
+# per rod at 0x140 + slot (story flag table B; 3 each with one Rod Mastery upgrade).
+RODS = ["Fire Rod", "Ice Rod", "Lightning Rod"]
+# Healing apples (0.9.92, apple_items): the palette's B slot; apples left this mission are the u32 at the same block
+# + 0x92C (read by the palette code at text 0xf5a708) [read live: 5 with the user's apple capacity].
+APPLES = "Apples"
+PALETTE_ITEMS = [*RODS, APPLES]  # client lock order; counter offsets in client.live_hook.PALETTE_USES
 RUNE_CHALLENGES = {"Mastering Remote Bombs": "Remote Bombs", "Mastering Cryonis": "Cryonis",
                    "Mastering Magnesis": "Magnesis", "Mastering Stasis": "Stasis",
                    "Explosive—Handle With Care": "Remote Bombs"}

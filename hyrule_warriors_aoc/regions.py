@@ -14,6 +14,7 @@ from .locations import (
     quest_location,
     weapon_location,
 )
+from .data_chests import chest_location
 from .data_koroks import korok_location
 
 if TYPE_CHECKING:
@@ -55,10 +56,11 @@ def create_regions(world: AgeOfCalamityWorld) -> None:
         region = Region(mission, player, multiworld)
         multiworld.regions.append(region)
         menu.connect(region, f"Start {mission}")
-        create_location(world, region, mission_location(mission))
-        for level in range(1, world.difficulty_levels + 1):
-            create_location(world, region, difficulty_location(mission_location(mission), level)).difficulty_of = \
-                mission_location(mission)
+        if world.clear_checked(mission):  # (final_mission_goal: The Future of Hyrule's clear is the win, no check)
+            create_location(world, region, mission_location(mission))
+            for level in range(1, world.difficulty_levels + 1):
+                create_location(world, region, difficulty_location(mission_location(mission), level)).difficulty_of = \
+                    mission_location(mission)
         _event(world, region, f"Event: Cleared {mission}", cleared_event(mission))
 
     story = Region("Story Complete", player, multiworld)
@@ -98,5 +100,16 @@ def create_regions(world: AgeOfCalamityWorld) -> None:
         create_location(world, side, lab_location(name))
     for source, kind, index in world.checked_koroks:
         create_location(world, side, korok_location(source, index))
+    for mission, index in world.checked_chests:
+        create_location(world, side, chest_location(mission, index))
+    from . import data_progress as progress  # 0.9.90 progress checks
+    for hero, level in world.checked_hero_levels:
+        create_location(world, side, progress.hero_level_location(hero, level))
+    for hero, level in world.checked_weapon_levels:
+        create_location(world, side, progress.weapon_level_location(hero, level))
+    for material, tier in world.checked_gathered:
+        create_location(world, side, progress.gathered_location(material, tier))
+    for enemy, tier in world.checked_defeated:
+        create_location(world, side, progress.defeated_location(enemy, tier))
     for name in world.checked_weapons:
         create_location(world, side, weapon_location(name))

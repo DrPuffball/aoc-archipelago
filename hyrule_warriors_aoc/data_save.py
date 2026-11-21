@@ -24,6 +24,19 @@ MISSION_RECORD_COUNT = 400
 # 2022 save's story clears sit in slot 1; slot 3 = Very Hard confirmed: a Very Hard Daruk clear, 2026-10-27]; Apocalyptic, added in an update, is above Very Hard (slot 4
 # [guess]); slot 5 unknown (counts as higher).
 DIFFICULTY_SLOTS = 6
+# The Battle of Hyrule Field (record 1) loads its first-play version (the New Game opening) when it has no clear time
+# in any slot, and without one it hangs when started from the map [confirmed on Eden 2026-11-19, vanilla and modded].
+# Shuffled-Hyrule-Field seeds (0.9.90 on) give it a time in slot 5, which no difficulty uses, so the game plays it normally while
+# the client (which ignores that slot for this record) still sees it uncleared.
+HF_RECORD, HF_MARKER_SLOT, HF_MARKER_TIME = 1, 5, 0x236
+
+
+def clear_slots(record: int, times) -> list[int]:
+    """A record's per-difficulty clear times as the client counts them (Hyrule Field's marker slot left out)."""
+    times = list(times)
+    if record == HF_RECORD:
+        times[HF_MARKER_SLOT] = 0
+    return times
 DIFFICULTIES = ("Easy", "Normal", "Hard", "Very Hard", "Apocalyptic")  # Apocalyptic (later update) = slot 4 [guess]
 
 RUPEES = 0x2C3A4  # u32

@@ -23,8 +23,8 @@ from .data import (
 )
 from .data_rewards import ITEM_RENAMES, REWARD_GROUPS, reward_quest_count
 
-# Korok seeds (and in-mission chests) stay local and vanilla: no checks (their location ids stay registered).
-SIDE_CATEGORIES = ["Weapons", "Challenges", "Quests"]
+# 0.9.90: Korok seeds and treasure chests in story missions can hold checks again (korok_checks, chest_checks).
+SIDE_CATEGORIES = ["Weapons", "Challenges", "Quests", "Korok Seeds", "Chests"]
 
 # Docstrings are what players read in the Options Creator and the YAML template (reworded 2026-11-02): one summary
 # line, then each choice on its own line, plain words, option names as they appear in the YAML.
@@ -211,11 +211,11 @@ class FirstMission(Choice):
     """
     Which story mission you can play first.
 
-    The client installs a starter save that skips the game's opening (The Battle of Hyrule Field is already cleared,
-    and its check is sent when you start). You begin on the world map with your starting heroes and this mission open.
+    The client installs a starter save that skips the game's opening. You begin on the world map with your starting
+    heroes and this mission open.
     Random Any: any story mission (it can be a hard one).
     Random Early: a random mission from chapters 1-2.
-    Vanilla: Road to the Ancient Lab.
+    Vanilla: The Battle of Hyrule Field.
     """
 
     display_name = "First Mission"
@@ -293,16 +293,144 @@ class WeaponChecks(Toggle):
     """
     Picking up each weapon holds a check.
 
-    Off by default: when each weapon drops isn't fully verified. Story mission clears always hold checks; Korok seeds
-    and in-mission chests never do.
+    Off by default: when each weapon drops isn't fully verified. Story mission clears always hold checks.
     """
 
     display_name = "Weapon Checks"
 
 
+class KorokChecks(DefaultOnToggle):  # (0.9.90, user: on by default)
+    """
+    Each Korok seed holds a check: 122 in story missions, 12 in challenges (those need challenges in the seed).
+    Story Only: the 122 story seeds. Challenges Only: the 12 challenge seeds.
+
+    The check is sent once the game records the seed.
+    """
+
+    display_name = "Korok Seed Checks"
+
+
+class ChestChecks(DefaultOnToggle):  # (0.9.90, user: on by default)
+    """
+    Each treasure chest in a story mission holds a check (153 chests; 28 more in Expansion Pass missions with include_dlc).
+    Challenges Only: only the 28 Expansion Pass chests (with include_dlc), since those missions are challenges there.
+
+    The check is sent the moment you open the chest; you still get what the chest holds.
+    """
+
+    display_name = "Treasure Chest Checks"
+
+
+class HeroLevelChecks(Toggle):
+    """
+    Heroes reaching levels hold checks ("Hero Level: Link Lv 10"): one per hero every Hero Level Check Interval levels,
+    up to Hero Level Check Max. Higher levels expect more of the story cleared first.
+    """
+
+    display_name = "Hero Level Checks"
+
+
+class HeroLevelCheckMax(Range):
+    """The highest hero level that holds a check (with Hero Level Checks)."""
+
+    display_name = "Hero Level Check Max"
+    range_start = 2
+    range_end = 100
+    default = 50
+
+
+class HeroLevelCheckInterval(Range):
+    """Levels between hero level checks: 1 = every level, 5 = levels 5, 10, 15 ..."""
+
+    display_name = "Hero Level Check Interval"
+    range_start = 1
+    range_end = 50
+    default = 10
+
+
+class WeaponLevelChecks(Toggle):
+    """
+    A hero's best weapon reaching levels holds checks ("Weapon Level: Link Lv 10"): one per hero every Weapon Level
+    Check Interval levels, up to Weapon Level Check Max. The game caps weapon levels at 20 at first, 25 after
+    A Monumental Undertaking and 30 after The Legendary Blacksmith, so levels above 20 and 25 need those quests (and are
+    left out when the seed doesn't have them).
+    """
+
+    display_name = "Weapon Level Checks"
+
+
+class WeaponLevelCheckMax(Range):
+    """The highest weapon level that holds a check (with Weapon Level Checks; the game's own maximum is 30)."""
+
+    display_name = "Weapon Level Check Max"
+    range_start = 2
+    range_end = 30
+    default = 20
+
+
+class WeaponLevelCheckInterval(Range):
+    """Levels between weapon level checks: 1 = every level, 5 = levels 5, 10, 15 ..."""
+
+    display_name = "Weapon Level Check Interval"
+    range_start = 1
+    range_end = 29
+    default = 5
+
+
+class EnemyDefeatChecks(Toggle):
+    """
+    Defeating enough of an enemy type holds checks ("Defeated: Lynel (1)"), counted by the trophies you have earned in
+    total (spending them later doesn't take progress back). The counts follow how many a mission has: Bokoblins
+    500 / 2000 / 5000, Moblins 10 / 30 / 75, Lynels 2 / 6 / 15 (tier 1 about a mission or two of play, tier 3 about
+    twelve). 10 enemy types (enemies not yet seen in story missions are left out), up to Gathering Check Tiers each.
+    """
+
+    display_name = "Enemy Defeat Checks"
+
+
+class EnemyDefeatScale(Range):
+    """Percent applied to every enemy defeat count (100 = the standard counts, 50 = half as many, 200 = twice)."""
+
+    display_name = "Enemy Defeat Scale"
+    range_start = 10
+    range_end = 400
+    default = 100
+
+
+class MaterialChecks(Toggle):
+    """
+    Gathering enough of a material holds checks ("Gathered: Hyrule Herb (1)"), counted by what you have gathered in
+    total since connecting (spending doesn't take progress back; materials the client gives you don't count). Counts
+    follow the material's rarity (common 20 / 60 / 150 ... very rare 1 / 3 / 8). 97 materials that story missions give
+    on every clear or that their enemies drop (gems and other one-time rewards are left out), up to Gathering Check
+    Tiers checks each. A material held at the game's 999 limit gains
+    nothing until some is spent.
+    """
+
+    display_name = "Material Checks"
+
+
+class MaterialScale(Range):
+    """Percent applied to every material count (100 = the standard counts, 50 = half as many, 200 = twice)."""
+
+    display_name = "Material Scale"
+    range_start = 10
+    range_end = 400
+    default = 100
+
+
+class GatheringCheckTiers(Range):
+    """Checks per material and per enemy type for Material Checks and Enemy Defeat Checks (1-3 rising counts)."""
+
+    display_name = "Gathering Check Tiers"
+    range_start = 1
+    range_end = 3
+    default = 2
+
+
 class SideContent(OptionSet):
     """
-    Older form of the check toggles (any of Weapons, Challenges, Quests; [] = story only).
+    Older form of the check toggles (any of Weapons, Challenges, Quests, Korok Seeds, Chests; [] = story only).
 
     If set to anything other than its default, it overrides the toggles. New YAMLs should use the toggles.
     """
@@ -330,6 +458,7 @@ class SideCheckDensity(Range):
     The percentage of challenges and quests that hold checks, picked at random.
 
     The rest are still playable but hold nothing. Lower this for a shorter game.
+    In game_mode challenges_only every challenge holds a check (this is ignored for challenges there).
     """
 
     display_name = "Side Check Density"
@@ -648,6 +777,25 @@ class SheikahRunes(Choice):
     default = option_shuffled  # 0.9.89 (user): shuffled by default, with the game mod
 
 
+class RodItems(DefaultOnToggle):
+    """
+    The Fire Rod, Ice Rod and Lightning Rod are items. Until a rod's item is found the client keeps that rod at 0 uses
+    in missions: it shows greyed out in the item palette (hold L) and can't be used. Off: the rods work as in the
+    normal game.
+    """
+
+    display_name = "Elemental Rod Items"
+
+
+class AppleItems(Toggle):
+    """
+    Healing apples are an item ("Apples"). Until it is found the apple slot of the item palette (hold L, then B) is
+    hidden and the apple count is held at 0 in missions, so you can't heal with them. Off by default.
+    """
+
+    display_name = "Apple Item"
+
+
 # --- Items ----------------------------------------------------------------------------------------------------------
 
 class HeartContainers(Range):
@@ -794,16 +942,22 @@ class LocalFiller(Toggle):
 
 # --- Hints and help -------------------------------------------------------------------------------------------------
 
-class HintMissionUnlocks(DefaultOnToggle):
+class HintMissionUnlocks(Toggle):  # (0.9.90, user: free pre-hints off by default, runes aside)
     """With mission_unlocks: Items, every "Unlock: <mission>" item is hinted for free when the room starts."""
 
     display_name = "Auto-Hint Mission Unlocks"
 
 
-class HintHeroes(DefaultOnToggle):
+class HintHeroes(Toggle):  # (0.9.90, user: free pre-hints off by default, runes aside)
     """Every hero you can receive is hinted for free when the room starts."""
 
     display_name = "Auto-Hint Heroes"
+
+
+class HintRunes(DefaultOnToggle):
+    """With sheikah_runes: Shuffled, the four rune items are hinted for free when the room starts."""
+
+    display_name = "Auto-Hint Runes"
 
 
 class MissionHintEvery(Range):
@@ -836,19 +990,18 @@ class FrameRate(Choice):
     60, 120, Unlimited: draw up to that many frames a second while you play (cutscenes, menus and the world map stay at
     the game's own 30). The game advances its time in 1/60 s steps; the client chooses how many steps each drawn frame
     takes, so a PC that draws 45 frames still plays at full speed, and above 60 some frames take none.
-    30: the game's own 30 FPS.
-    Off: the client leaves the frame rate alone (for another frame-rate mod).
-    Type "/fps 60", "/fps 120", "/fps unlimited", "/fps 30", "/fps off" or "/fps seed" in the client to change it for
-    your own game.
+    Off: the game's own 30 FPS; the client leaves the frame rate alone (also what to pick with another frame-rate mod).
+    Type "/fps 60", "/fps 120", "/fps unlimited", "/fps off" or "/fps seed" in the client (or use its Options tab) to
+    change it for your own game.
     """
 
     display_name = "Frame Rate"
     option_fps_60 = 0
-    option_fps_30 = 1
     option_off = 2
     option_fps_120 = 3
     option_unlimited = 4
-    default = option_fps_30  # 0.9.89 (user): the higher modes are experimental, off by default
+    alias_fps_30 = 2  # 0.9.90 (user): "30" and "off" merged; an older YAML's fps_30 is off
+    default = option_off  # 0.9.89 (user): the higher modes are experimental, off by default
 
 
 class GoalBanner(DefaultOnToggle):
@@ -904,6 +1057,19 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     challenge_checks: ChallengeChecks
     quest_checks: QuestChecks
     lab_checks: LabChecks
+    korok_checks: KorokChecks
+    chest_checks: ChestChecks
+    hero_level_checks: HeroLevelChecks
+    hero_level_check_max: HeroLevelCheckMax
+    hero_level_check_interval: HeroLevelCheckInterval
+    weapon_level_checks: WeaponLevelChecks
+    weapon_level_check_max: WeaponLevelCheckMax
+    weapon_level_check_interval: WeaponLevelCheckInterval
+    enemy_defeat_checks: EnemyDefeatChecks
+    enemy_defeat_scale: EnemyDefeatScale
+    material_checks: MaterialChecks
+    material_scale: MaterialScale
+    gathering_check_tiers: GatheringCheckTiers
     side_content: SideContent
     side_check_density: SideCheckDensity
     include_dlc: IncludeDLC
@@ -927,6 +1093,8 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     goal_challenges: GoalChallenges
     locked_features: LockedFeatures
     sheikah_runes: SheikahRunes
+    rod_items: RodItems
+    apple_items: AppleItems
     minimum_character_level: MinimumCharacterLevel
     catch_up_levels: CatchUpLevels
     featured_challenge: FeaturedChallenge
@@ -954,6 +1122,7 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
     filler_weights: FillerWeights
     hint_mission_unlocks: HintMissionUnlocks
     hint_heroes: HintHeroes
+    hint_runes: HintRunes
     hero_level_cap: HeroLevelCap
     goal_banner: GoalBanner
     frame_rate: FrameRate
@@ -974,8 +1143,12 @@ class AgeOfCalamityOptions(PerGameCommonOptions):
 option_groups = [
     OptionGroup("Game Mode and Goal", [GameMode, IncludeDLC, FinalMissionGoal, GoalStoryMissions, GoalChallenges, GoalQuests,
                                        GoalAllHeroes, GoalHopeOfAllHyrule, GoalDifficulty]),
-    OptionGroup("What Holds Checks", [ChallengeChecks, QuestChecks, LabChecks, WeaponChecks, SideCheckDensity,
+    OptionGroup("What Holds Checks", [ChallengeChecks, QuestChecks, LabChecks, WeaponChecks, KorokChecks, ChestChecks,
+                                      SideCheckDensity,
                                       RegionHopeChecks, DifficultyChecks, DifficultyChecksChallenges, DifficultyLock]),
+    OptionGroup("Progress Checks", [HeroLevelChecks, HeroLevelCheckMax, HeroLevelCheckInterval, WeaponLevelChecks,
+                                    WeaponLevelCheckMax, WeaponLevelCheckInterval, EnemyDefeatChecks, EnemyDefeatScale,
+                                    MaterialChecks, MaterialScale, GatheringCheckTiers]),
     OptionGroup("Story", [MissionUnlocks, StartingMissionUnlocks, FirstMission, MissionOrder, StoryParty,
                           SideMissionsPerUnlock]),
     OptionGroup("Challenges and Quests", [ChallengeUnlockOrder, QuestUnlockOrder, PostStoryUnlock, ChallengeLogic,
@@ -983,11 +1156,11 @@ option_groups = [
     OptionGroup("Heroes", [StartingCharacterCount, StartingCharacterPool, MinimumCharacterLevel, CatchUpLevels,
                            HeroLevelCap]),
     OptionGroup("Open from the Start", [StartWithSheikahSensor, StartWithTrackers, OpenShops, OpenStables, OpenDyeShop]),
-    OptionGroup("Locked Features", [WeaponFusion, LockedFeatures, SheikahRunes]),
+    OptionGroup("Locked Features", [WeaponFusion, LockedFeatures, SheikahRunes, RodItems, AppleItems]),
     OptionGroup("Upgrade Items", [HeartContainers, ComboUpgrades, SpecialGaugeUpgrades, EnhancedAbilities,
                                   WeaponCapacityUpgrades, SealSlotUpgrades, WeaponItems, QuestRewardItems]),
     OptionGroup("Filler and Mission Rewards", [FillerWeights, LocalFiller, MissionRewards]),
-    OptionGroup("Hints and Help", [HintMissionUnlocks, HintHeroes, MissionHintEvery, StuckRescueMinutes, GoalBanner, FrameRate,
+    OptionGroup("Hints and Help", [HintMissionUnlocks, HintHeroes, HintRunes, MissionHintEvery, StuckRescueMinutes, GoalBanner, FrameRate,
                                    FeaturedChallenge]),
     OptionGroup("Multiworld Pacing", [SteadyRewards, StoryPacing]),
 ]

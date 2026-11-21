@@ -18,8 +18,8 @@ _STORY = set(MISSION_NAMES)
 
 
 def ryujinx_data_roots() -> list[str]:
-    """Where Ryujinx may keep its data: the folder set with /ryujinx_folder, a portable install next to a running
-    Ryujinx (<program folder>/portable), and the default user folders."""
+    """Where Ryujinx may keep its data: the folder set with /emulator_folder (or /ryujinx_folder), a portable
+    install next to a running Ryujinx (<program folder>/portable), and the default user folders."""
     from .ryujinx import ryujinx_exe_dirs
     from .settings import load_settings
     roots = []
@@ -34,9 +34,13 @@ AOC_TITLE = "01002B00111A2000"
 
 
 def eden_data_roots() -> list[str]:
-    """Eden's user folders: <program folder>/user next to a running (portable) Eden, then %APPDATA%/eden."""
+    """Eden's user folders: the one set with /emulator_folder, <program folder>/user next to a running (portable)
+    Eden, then %APPDATA%/eden."""
     from .ryujinx import emulator_processes, ryujinx_exe_dirs
+    from .settings import load_settings
     roots = []
+    if folder := load_settings().get("eden_folder"):
+        roots.append(folder)
     if any(name == "Eden" for _, name in emulator_processes()):
         roots += [os.path.join(d, "user") for d in ryujinx_exe_dirs()]
     roots.append(os.path.expandvars(r"%APPDATA%\eden"))
@@ -75,6 +79,14 @@ def message_for(name: str) -> dict:
         return {"type": "quest_completed", "quest": name}
     if name in WEAPON_KINDS:
         return {"type": "weapon_obtained", "weapon": name}
+    if name.startswith("Korok Seed: "):
+        return {"type": "korok_found", "korok": name}
+    if name.startswith("Treasure Chest: "):
+        return {"type": "chest_opened", "chest": name}
+    for prefix, kind in (("Hero Level: ", "hero_level"), ("Weapon Level: ", "weapon_level"),
+                         ("Gathered: ", "gathered"), ("Defeated: ", "defeated")):  # 0.9.90 progress checks
+        if name.startswith(prefix):
+            return {"type": "progress_reached", "kind": kind, "name": name}
     if name.endswith((" (Normal)", " (Hard)", " (Very Hard)")):  # per-difficulty check (session.difficulty_ids)
         return {"type": "difficulty_cleared", "name": name}
     return {"type": "challenge_cleared", "challenge": name}

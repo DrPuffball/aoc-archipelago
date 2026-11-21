@@ -17,10 +17,14 @@ from .data import (
     ITEM_ID_BASE,
     RUNE_CHALLENGES,
     ITEM_RUNES,
+    APPLES,
+    RODS,
     RUNES,
     WEAPONS,
 )
 
+from .data_chests import CHEST_RUNES, CHEST_RUNES_ALL
+from .data_koroks import KOROK_RUNES
 from .data_lab import LAB_ITEMS
 from .data_rewards import DIRECT_GROUPS, INDIVIDUAL_GROUPS, REWARD_BY_ITEM, REWARD_GROUPS
 from .options import MissionUnlocks, SheikahRunes
@@ -62,7 +66,7 @@ def unlock_item(mission: str) -> str:
 
 # Append-only ID ranges: characters 0-49, per-character upgrades 50-399 (50 per family),
 # global upgrades 400-449, features 450-499, weapons 500-699, filler 700-799, runes 800-849,
-# mission unlocks 850-899 (every story mission; Hyrule Field's is 869), quest reward groups 900-949.
+# mission unlocks 850-899 (every story mission; Hyrule Field's is 869), quest reward groups 900-949, rods 1800-1809.
 ITEM_NAME_TO_ID: dict[str, int] = {}
 
 
@@ -89,6 +93,7 @@ _register([g.item for g in INDIVIDUAL_GROUPS], 1000, 200)  # 0.9.78: one item pe
 _register([g.item for g in DIRECT_GROUPS], 1200, 100)  # 0.9.81: rewards given directly (EX abilities, research)
 _register(LAB_ITEMS, 1300, 50)  # 0.9.81: Royal Ancient Lab rewards
 _register([unlock_item(c.name) for c in CHALLENGES if c.name not in DLC_STORY_MISSIONS], 1400, 400)  # 0.9.87: challenge_unlock_order items
+_register([*RODS, APPLES], 1800, 10)  # 0.9.92: rod_items, apple_items
 
 UPGRADE_FAMILIES = set(CHARACTER_UPGRADES)
 
@@ -109,9 +114,13 @@ def classify(world: AgeOfCalamityWorld, name: str) -> ItemClassification:
         # Characters only matter to logic through restricted challenges, quests and weapon checks.
         return ItemClassification.progression if world.characters_matter else ItemClassification.useful
     if name.startswith("Rune: "):
-        # Progression only when a Mastering <rune> challenge (or another rune challenge) is in the seed.
-        needed = set(RUNE_CHALLENGES) & set(world.active_challenges)
-        return ItemClassification.progression if needed else ItemClassification.useful
+        # Progression only when a rune challenge, or a checked Korok seed or chest (0.9.90), needs this rune.
+        rune = name[len("Rune: "):]
+        needed = {RUNE_CHALLENGES[c] for c in world.active_challenges if c in RUNE_CHALLENGES}
+        needed |= {r for s, _, _ in getattr(world, "checked_koroks", ()) for r in KOROK_RUNES.get(s, ())}
+        if getattr(world, "checked_chests", ()):
+            needed |= set(CHEST_RUNES_ALL) | {r for m, _ in world.checked_chests for r in CHEST_RUNES.get(m, ())}
+        return ItemClassification.progression if rune in needed else ItemClassification.useful
     if name.startswith(UNLOCK_PREFIX):
         return ItemClassification.progression
     if name in getattr(world, "reward_progression", ()):  # an item a checked quest or challenge waits on
@@ -151,10 +160,10 @@ def add_bonus_checks(world: AgeOfCalamityWorld, surplus: int) -> int:
     if options_unlock_items(world):
         # unlock items: any mission can be played before the goal, so all share them (user, 2026-11-15: with a goal of
         # 3 the first two slots got ~30 each and the rest one); the goal mission itself only ends the run
-        order = [m for m in world.mission_order[1:]
+        order = [m for m in world.mission_order[world.first_real_slot:]
                  if not (world.options.final_mission_goal and m == FINAL_MISSION)]
     else:  # story order: only the slots before the goal can be played before it
-        order = world.mission_order[1:world.options.goal_story_missions.value]
+        order = world.mission_order[world.first_real_slot:world.options.goal_story_missions.value]
     challenges = sorted(world.checked_challenges)
     # (the DLC story missions are story missions: as many as a story clear)
     caps = [(m, BONUS_PER_MISSION) for m in order] + [
@@ -199,8 +208,9 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
     # The Battle of Hyrule Field comes cleared (on Easy) in the starter save, so its clear is sent the moment a player
     # connects: it holds one of your own filler items, never anything for someone else (user request 2026-10-28).
     from .locations import mission_location
-    world.get_location(mission_location(world.mission_order[0])).place_locked_item(
-        create_item(world, get_filler_item_name(world)))
+    if not world.hf_shuffled:  # (shuffled: a normal mission with real checks)
+        world.get_location(mission_location(world.mission_order[0])).place_locked_item(
+            create_item(world, get_filler_item_name(world)))
 
     # Heroes, locked features and runes must always exist: without them content stays locked for good. Anything that
     # finds no check (small seeds) is given at the start of the run instead of being lost.
@@ -209,7 +219,7 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
         world.push_precollected(create_item(world, unlock_item(mission)))
     wanted = []
     if options.mission_unlocks == MissionUnlocks.option_items:  # first, so they get checks before anything else
-        wanted += [unlock_item(m) for m in world.mission_order[1:]
+        wanted += [unlock_item(m) for m in world.mission_order[1:]  # (slot 1 is open from the start)
                    if m not in world.starting_unlocks
                    and not (m == FINAL_MISSION and options.final_mission_goal)]  # opens by the goal's counts
         wanted += [unlock_item(m) for m in world.dlc_story]  # DLC story missions open by their own items too
@@ -222,6 +232,10 @@ def create_all_items(world: AgeOfCalamityWorld) -> None:
                if not (f == "Shops" and options.open_shops)]  # open_shops wins over a locked Shops feature
     if options.sheikah_runes == SheikahRunes.option_shuffled:
         wanted += [rune_item(r) for r in world.item_runes]  # 0.9.89+: all four (rune mod)
+    if options.rod_items:  # 0.9.92: the client holds each rod at 0 uses until its item arrives
+        wanted += list(RODS)
+    if options.apple_items:  # 0.9.92: no healing apples in missions until this item arrives
+        wanted.append(APPLES)
     if options.hint_mission_unlocks:  # free hints at the room start (user options)
         options.start_hints.value |= story_unlocks  # (not the challenge unlocks: far too many to hint)
     if options.hint_heroes:

@@ -129,6 +129,7 @@ LAB_MISSION_CONDITION = {"The Battle-Tested Guardian": FORGOTTEN_TEMPLE, "The Ul
                          "The Relic of Legend": FUTURE_OF_HYRULE}
 LAB_RUNE_CONDITION = {"Power Play: Magnetic Mayhem": "Magnesis", "Power Play: Go with the Flow": "Stasis",
                       "Power Play: Nice and Icy": "Cryonis", "Power Play: Bombs Away": "Remote Bombs"}
+LAB_ROD_CONDITION = {"An Apple a Day": "Fire Rod"}  # (fire rod kills; with rod_items the rod is an item)
 LAB_WEAPON_CONDITION = {"Applied Research: Clawsome Power": ("Link", FLAILS),
                         "Applied Research: Magnetic Inspiration": ("Link", FLAILS),
                         "Present for the Princess": ("Zelda", CYCLES), "Ride On": ("Zelda", CYCLES)}

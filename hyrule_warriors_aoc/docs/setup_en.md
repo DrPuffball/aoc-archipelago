@@ -4,8 +4,8 @@
 
 - [Archipelago](https://github.com/ArchipelagoMW/Archipelago/releases/latest) 0.6.7 or newer
 - `hyrule_warriors_aoc.apworld`, installed into Archipelago
-- Your own legally dumped copy of the game, updated to v1.4.1, in **Ryujinx** or **Eden** on Windows
-- Ryujinx: Options > Settings > System > **Memory Manager Mode: Software**. Eden: **CPU accuracy Auto** (the default).
+- Your own legally dumped copy of the game, updated to v1.4.1, in **Eden** (recommended) or **Ryujinx** on Windows
+- Ryujinx: Options > Settings > System > **Memory Manager Mode: Software**. Eden: **CPU accuracy Unsafe** (faster) or Auto.
   The client reads and writes the game's memory through these.
 
 ## 1. Make your YAML
@@ -21,7 +21,7 @@ cutscene, then close the game). Open only one emulator at a time.
 With the game **closed**, open **Age of Calamity Client** from the Archipelago Launcher and connect to your room
 with your slot name. The client sets up this seed's save by itself: a new seed gets a starter save (your previous save
 is kept and comes back when you connect to its seed again; switching between seeds works the same way). Then start
-Age of Calamity and pick **Continue** (on a new seed, pause and go back to the map once so everything shows up).
+Age of Calamity and pick **Continue** (the client redraws the world map by itself whenever something opens; if an icon is ever missing, pause and go back to the map once).
 The game reads its save only when it boots, so connect the client before starting the game. Everything else is
 automatic:
 
@@ -36,7 +36,7 @@ automatic:
 - The same seed can be played in both emulators: start the game once in the other one, close it, and type
   `/sync_saves`. From then on the newest save is copied over the older one whenever no game runs (with a backup).
 - The client finds Ryujinx's data in `%APPDATA%\Ryujinx` and next to a portable Ryujinx, and Eden's in
-  `%APPDATA%\eden` (a portable Eden while it runs). If your Ryujinx is elsewhere, type `/ryujinx_folder <folder>`.
+  `%APPDATA%\eden` (a portable Eden while it runs). If your Ryujinx or Eden keeps its data elsewhere, use **Pick emulator folder…** in the Options tab (or `/emulator_folder <folder>`).
 
 Useful commands (information only, nothing needs to be typed to play): `/check_hook` shows the game connection,
 `/todo` your goal progress and what you can play now, `/inventory` what you have received, `/deliver` what is still waiting for the game,
@@ -47,7 +47,7 @@ Universal Tracker works with this world without your YAML.
 ## Troubleshooting
 - **Game not detected:** load a save (not just the title screen). Ryujinx: Memory Manager Mode "Software". Eden: CPU
   accuracy Auto. The game must be v1.4.1. Close any other Age of Calamity client window and any second emulator.
-- **No save found:** start the game once in your emulator; with a portable or moved Ryujinx use `/ryujinx_folder`.
+- **No save found:** start the game once in your emulator; with a portable or moved Ryujinx or Eden use **Pick emulator folder…** (Options tab) or `/emulator_folder`.
 - **Something went wrong:** quit without saving, or restore your save backup.
 - **Version warning on connect:** the seed was made with an older apworld. New client features work with it; options
   added later only apply to newly generated seeds.

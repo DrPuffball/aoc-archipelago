@@ -53,7 +53,7 @@ class SessionTests(WorldTestBase):
         self.assertIsNotNone(session.on_challenge_cleared("Mastering Remote Bombs"))
         self.assertIsNotNone(session.on_quest_completed("Hyrule Swordfighting Academy"))
         self.assertIsNone(session.on_quest_completed("Hyrule Swordfighting Academy"))
-        self.assertIsNone(session.on_korok_found("Korok: The Battle of Hyrule Field #1"))  # Koroks are no checks
+        self.assertIsNone(session.on_korok_found("Korok Seed: The Battle of Hyrule Field #1"))  # Koroks are no checks
 
     def test_reconnect_restores_cleared_state(self) -> None:
         session = self.make_session()
@@ -376,7 +376,7 @@ class MissionUnlockItemTests(WorldTestBase):
         names += [i.name for i in self.multiworld.precollected_items[self.player]]
         unlocks = sorted(n for n in names if n.startswith("Unlock: "))
         from ..data_challenges import DLC_STORY_MISSIONS  # (include_dlc, the default: Guardian of Remembrance too)
-        self.assertEqual(unlocks, sorted([f"Unlock: {m.name}" for m in MISSIONS[1:]]
+        self.assertEqual(unlocks, sorted([f"Unlock: {m.name}" for m in MISSIONS]  # (Hyrule Field shuffled too)
                                          + [f"Unlock: {m}" for m in DLC_STORY_MISSIONS]))
         self.assertEqual(self.world.mission_order, [m.name for m in MISSIONS])  # mission_order is ignored
         self.assertEqual(len(self.world.starting_unlocks), 1)
@@ -704,6 +704,22 @@ class DifficultyGoalTests(WorldTestBase):
         self.assertEqual(session.goal_banner_text(), "Goal complete")
 
 
+class FinalMissionBannerTests(WorldTestBase):
+    """final_mission_goal: once The Future of Hyrule is open the banner only names it (user, 2026-11-19)."""
+    game = "Hyrule Warriors Age of Calamity"
+    options = {"final_mission_goal": True, "goal_story_missions": 3, "goal_challenges": 0, "include_dlc": False}
+
+    def test_banner_names_the_final_mission(self) -> None:
+        session = Session(json.loads(json.dumps(self.world.fill_slot_data())))
+        self.assertTrue(session.goal_banner_text().startswith("Goal: Story 0/"))
+        others = [m for m in session.mission_ids if m != session.final_mission]
+        session.cleared_missions |= set(others[:2])
+        self.assertTrue(session.mission_available(session.final_mission))
+        self.assertEqual(session.goal_banner_text(), f"Goal: clear {session.final_mission}")
+        session.cleared_missions.add(session.final_mission)
+        self.assertEqual(session.goal_banner_text(), "Goal complete")
+
+
 class ShortGoalTests(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
     options = {**CLASSIC, "goal_story_missions": 5, "final_mission_goal": False, "include_dlc": False}
@@ -963,6 +979,8 @@ class DifficultyCheckTests(WorldTestBase):
         w = self.world
         names = {loc.name for loc in self.multiworld.get_locations(self.player)}
         for m in w.mission_order:
+            if not w.clear_checked(m):
+                continue  # (a goal Future of Hyrule: no clear checks)
             self.assertIn(difficulty_location(mission_location(m), 2), names)
             self.assertNotIn(difficulty_location(mission_location(m), 3), names)
         c = sorted(w.checked_challenges)[0]
@@ -999,7 +1017,7 @@ class DifficultyCheckTests(WorldTestBase):
 
 
 class DifficultyLockTests(WorldTestBase):
-    """difficulty_lock hard: no per-difficulty checks; only Hard+ clears count (Hyrule Field exempt)."""
+    """difficulty_lock hard: no per-difficulty checks; only Hard+ clears count (Hyrule Field too, now it is shuffled)."""
     game = "Hyrule Warriors Age of Calamity"
     options = {"difficulty_lock": "hard", "difficulty_checks": "very_hard"}
 
@@ -1025,11 +1043,11 @@ class DifficultyLockTests(WorldTestBase):
 
         ctx = AoCContext.__new__(AoCContext)
         ctx.session, ctx.live, ctx._too_easy, ctx.overlay = session, Live(), None, Overlay()
-        self.assertEqual(ctx._counted_clears(), {hard, "The Battle of Hyrule Field"})
+        self.assertEqual(ctx._counted_clears(), {hard})  # (an Easy Hyrule Field clear doesn't count either)
         self.assertEqual(ctx.overlay.shown, [])  # what was already there is not announced
         ctx._too_easy = set()
         ctx._counted_clears()
-        self.assertEqual(len(ctx.overlay.shown), 1)
+        self.assertEqual(len(ctx.overlay.shown), 2)  # (the easy one and Hyrule Field)
 
 
 class DlcFailsafeTests(WorldTestBase):
@@ -1226,21 +1244,21 @@ class EffectAuditTests(unittest.TestCase):
 
 
 class FirstMissionTests(WorldTestBase):
-    """first_mission random_early (default): a chapter 1-2 mission first; Hyrule Field gets an unlock item."""
+    """first_mission random_early: a chapter 1-2 mission first (Hyrule Field shuffled, so slot 1), and it is open."""
     game = "Hyrule Warriors Age of Calamity"
     options = {"mission_unlocks": "items", "starting_mission_unlocks": 2, "first_mission": "random_early"}
 
-    def test_hyrule_field_first_then_a_random_early_mission(self) -> None:
+    def test_a_random_early_mission_first(self) -> None:
         order = self.world.mission_order
-        self.assertEqual(order[0], "The Battle of Hyrule Field")  # cleared in the starter save
-        self.assertLessEqual(next(m.chapter for m in MISSIONS if m.name == order[1]), 2)
-        self.assertEqual(self.world.starting_unlocks[0], order[1])  # the first mission you play is open
+        self.assertLessEqual(next(m.chapter for m in MISSIONS if m.name == order[0]), 2)
+        self.assertEqual(self.world.starting_unlocks[0], order[0])  # the first mission you play is open
         self.assertEqual(len(self.world.starting_unlocks), 2)
         data = self.world.fill_slot_data()
         self.assertTrue(data["starter_save"])
         session = Session(json.loads(json.dumps(data)))
         session.apply_received_item_names([f"Unlock: {m}" for m in self.world.starting_unlocks])
-        self.assertIn(order[1], session.available_missions())
+        session.unlocked_characters |= set(self.world.characters)
+        self.assertIn(order[0], session.available_missions())
 
 
 class StarterSaveTests(unittest.TestCase):
