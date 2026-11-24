@@ -282,7 +282,9 @@ class AoCCommandProcessor(ClientCommandProcessor):
         s = ctx.session
         for line in s.goal_progress():
             self.output(line)
-        self.output("Story missions you can play now: " + (", ".join(s.available_missions()) or "none"))
+        self.output("Story missions you can play now: " + (", ".join(
+            m + (f" (can't be finished without {' and '.join(need)})" if (need := s.missing_runes(m)) else "")
+            for m in s.available_missions()) or "none"))
         self.output("Heroes you may use: " + ", ".join(sorted(s.unlocked_characters)))
         if s.features:
             self.output("Unlocked features: " + ", ".join(sorted(s.features)))

@@ -61,11 +61,22 @@ def chest_location(mission: str, index: int) -> str:
     return f"Treasure Chest: {mission} #{index}"
 
 
-# Runes treasure chests may need (0.9.90). Half-buried chests are pulled out with Magnesis and the guides don't say which
-# chests are buried, so every chest needs Magnesis. Named in guides (2026-11-18): Remote Bombs for the chest behind
-# rocks in Revali (Game8) and behind a cracked wall in Calamity Strikes (Nintendo Life); per mission, as for Koroks.
-CHEST_RUNES_ALL: tuple[str, ...] = ("Magnesis",)
-CHEST_RUNES: dict[str, tuple[str, ...]] = {
-    "Revali, the Rito Warrior": ("Remote Bombs",),
-    "Calamity Strikes": ("Remote Bombs",),
+# The rune each treasure chest needs, by (mission, number) [game data 2026-11-23: the chest table, LinkData2 0x7f9314, 10
+# rows per block: its buried flag (u16 at +12) is set on exactly the chests the Zelda Dungeon wiki lists as Magnesis, and
+# its contents match the wiki's list in order; Remote Bombs: the chests behind cracked walls (gimmick kind 14), by position].
+CHEST_RUNES: dict[tuple[str, int], tuple[str, ...]] = {
+    ("Road to the Ancient Lab", 2): ("Magnesis",),
+    ("Road to the Ancient Lab", 6): ("Magnesis",),
+    ("Revali, the Rito Warrior", 3): ("Magnesis",),
+    ("Urbosa, the Gerudo Chief", 9): ("Magnesis",),
+    ("The Yiga Clan Attacks!", 8): ("Magnesis",),
+    ("The Road Home, Besieged", 9): ("Magnesis",),
+    ("When Courage Fails", 8): ("Magnesis",),
+    ("Calamity Strikes", 7): ("Remote Bombs",),
+    ("Air and Lightning", 9): ("Magnesis",),
+    ("The Great Plateau", 10): ("Magnesis",),
+    ("The Future of Hyrule", 7): ("Remote Bombs",),
+    ("The Future of Hyrule", 8): ("Remote Bombs",),
+    ("EX Battle of Goponga Village", 5): ("Magnesis",),
+    ("EX Battle for Kakariko Village", 6): ("Magnesis",),
 }

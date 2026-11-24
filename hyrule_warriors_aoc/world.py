@@ -24,6 +24,7 @@ from .data import (
     MISSION_NAMES,
     MISSIONS,
     ITEM_RUNES,
+    MISSION_RUNES,
     MOD_ITEM_RUNES,
     APPLES,
     RODS,
@@ -275,7 +276,7 @@ class AgeOfCalamityWorld(World):
             # first - Calamity Strikes, which needs all four Champions: the fill failed, option fuzz 2026-11-02)
             pick = self.random.choice([m.name for m in MISSIONS[lo:]
                                        if (any_mission or m.chapter <= 2) and m.name not in CHAINED_MISSIONS
-                                       and m.name != FINAL_MISSION])
+                                       and m.name != FINAL_MISSION and not self._needs_rune(m.name)])
             i = assigned.index(pick)
             assigned[lo], assigned[i] = assigned[i], assigned[lo]
         # (0.9.66-0.9.71 pinned Calamity Strikes and the rescues to their story slots. The user saw no Champion trap
@@ -284,6 +285,7 @@ class AgeOfCalamityWorld(World):
         if options.final_mission_goal:  # the goal mission sits in the last story slot (and is never the first)
             i = assigned.index(FINAL_MISSION)
             assigned[i], assigned[-1] = assigned[-1], assigned[i]
+        self._keep_rune_missions_playable(assigned, lo, in_order=not unlock_items)
         if ut:
             assigned = [ut["mission_slots"][s] for s in slots]
         self.slot_to_mission = dict(zip(slots, assigned))
@@ -297,7 +299,7 @@ class AgeOfCalamityWorld(World):
             self.slot_to_mission, self.slot_prerequisites, self.mission_order = {first: first}, {first: ()}, [first]
             pick = first
         # With unlock items the story has no order: the player starts with a few unlocks for early missions.
-        early = [m.name for m in MISSIONS[lo:] if m.chapter <= 2 and m.name != pick]
+        early = [m.name for m in MISSIONS[lo:] if m.chapter <= 2 and m.name != pick and not self._needs_rune(m.name)]
         count = min(options.starting_mission_unlocks.value, len(early) + 1) if unlock_items else 0
         if count == 1 and options.story_party == StoryParty.option_vanilla:
             # Fixed parties leave a single starting mission (one check) to begin the fill from: about 4 in 5 such seeds
@@ -645,6 +647,7 @@ class AgeOfCalamityWorld(World):
         if o.final_mission_goal and FINAL_MISSION in chain:
             chain.remove(FINAL_MISSION)
             chain.insert(max(2, min(o.goal_story_missions.value, len(chain) + 1) - 1), FINAL_MISSION)
+        self._keep_rune_missions_playable(chain, 0 if self.hf_shuffled else 1, in_order=True)
         if self.ut_data and self.ut_data.get("story_chain"):
             chain = list(self.ut_data["story_chain"])
         self.story_chain = chain
@@ -652,6 +655,26 @@ class AgeOfCalamityWorld(World):
         self.mission_order = base
         self.slot_to_mission = {m: m for m in base}
         self.slot_prerequisites = {m: ((chain[chain.index(m) - 1],) if chain.index(m) else ()) for m in base}
+
+    def _needs_rune(self, mission: str) -> bool:
+        """A story mission that can't be finished with the runes you start with (data.MISSION_RUNES)."""
+        return mission in MISSION_RUNES and self.options.sheikah_runes != SheikahRunes.option_start_with_all
+
+    def _keep_rune_missions_playable(self, order: list[str], lo: int, in_order: bool) -> None:
+        """A mission that needs a rune is never one you start with, and where missions open in order never one of the
+        first two (the only checks before them). With vanilla runes The Battle of Hyrule Field hands Remote Bombs out, so
+        in an ordered story it comes before them (or they would wait on each other)."""
+        for i in range(lo, min(2 if in_order else lo + 1, len(order))):
+            if self._needs_rune(order[i]):
+                j = self.random.choice([k for k in range(2, len(order)) if not self._needs_rune(order[k])
+                                        and order[k] not in CHAINED_MISSIONS and order[k] != FINAL_MISSION])
+                order[i], order[j] = order[j], order[i]
+        source = MISSIONS[0].name
+        if in_order and self.options.sheikah_runes == SheikahRunes.option_vanilla and source in order:
+            first = min((order.index(m) for m in MISSION_RUNES if m in order), default=len(order))
+            at = order.index(source)
+            if at > first:
+                order[first], order[at] = order[at], order[first]
 
     def chain_before(self, name: str) -> str | None:
         """Story Only: the mission whose clear opens this one."""

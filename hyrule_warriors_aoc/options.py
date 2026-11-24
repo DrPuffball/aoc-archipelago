@@ -768,6 +768,9 @@ class SheikahRunes(Choice):
     Vanilla: you get them in the story (Remote Bombs and Cryonis in The Battle of Hyrule Field, Magnesis and Stasis in
     Road to the Ancient Lab).
     Start With All: all four from the start.
+
+    Some missions, challenges, Korok seeds, chests and lab nodes can't be done without a certain rune (Remote Bombs for
+    Revali, Urbosa and When Courage Fails, for example). Logic waits for it, and you never start with such a mission.
     """
 
     display_name = "Sheikah Slate Runes"

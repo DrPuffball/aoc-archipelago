@@ -742,6 +742,12 @@ class Session:
         flags.update({r: self.runes_all or r in self.runes for r in enforced})
         return flags
 
+    def missing_runes(self, mission: str) -> list[str]:
+        """Runes a story mission can't be finished without (data.MISSION_RUNES) that the game doesn't have now."""
+        from ..data import MISSION_RUNES
+        have = self.mod_rune_flags()
+        return [r for r in MISSION_RUNES.get(mission, ()) if have.get(r) is False]
+
     def mod_rune_flags(self) -> dict[str, bool]:
         """With the rune mod active the game shows exactly the runes the client writes, for every seed: rune (and
         "Sheikah Slate", the rune menu) -> on. Shuffled: received items (runes a seed doesn't enforce stay on, as that

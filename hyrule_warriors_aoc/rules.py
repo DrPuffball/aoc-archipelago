@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING
 from BaseClasses import LocationProgressType, ItemClassification
 from worlds.generic.Rules import add_item_rule, set_rule
 
-from .data import BOSS_CHALLENGES, FINAL_MISSION, ITEM_RUNES, MISSION_BY_NAME, RUNE_CHALLENGES, WEAPON_BY_NAME
+from .data import BOSS_CHALLENGES, FINAL_MISSION, ITEM_RUNES, MISSION_BY_NAME, MISSION_RUNES, ROD_CHALLENGES, RUNE_CHALLENGES, WEAPON_BY_NAME
 from .data_challenges import (CALAMITY, CHALLENGE_BY_NAME, CHAMPIONS, GAME_LEVEL, challenge_gate,
                               vanilla_prerequisites)
-from .data_chests import CHEST_RUNES, CHEST_RUNES_ALL, DLC_CHESTS, SHARED_CHESTS, chest_location
+from .data_chests import CHEST_RUNES, DLC_CHESTS, SHARED_CHESTS, chest_location
 from .data_koroks import KOROK_RUNES, korok_location
 from .data_quest_unlocks import GAME_QUEST_PREREQS
 from .data_rewards import ALL_GROUPS, FEATURE_CHALLENGES
@@ -32,7 +32,8 @@ COMPLETIONS = "Completions"  # world.COMPLETIONS: completion events collected (w
 # Logic principle: where the real game's requirements are uncertain, demand *more* than the game
 # does (later gates, extra prerequisites). That can only make a seed harder to roll, never impossible.
 #
-# Story missions need nothing but their prerequisites: the hook lets any party play any story mission, except that
+# Story missions need nothing but their prerequisites and a rune three of them can't be finished without
+# (data.MISSION_RUNES): the hook lets any party play any story mission, except that
 # a mission's support heroes (AI allies) can't be picked, so it needs one other hero (world.party_needs).
 # Characters matter only for restricted challenges (and what depends on them) and weapon checks.
 # Only progression items may appear in rules; characters are progression whenever side content is on.
@@ -74,15 +75,13 @@ def _gate_parts(gate: str):
 
 def lab_needs(world, name: str) -> tuple[list[str], list[str]]:
     """(all of, any of): items and events a lab node's condition needs."""
-    from .items import character_item, rune_item, weapon_item
-    from .options import SheikahRunes
+    from .items import character_item, weapon_item
     all_of, any_of = [], []
     if name in LAB_MISSION_CONDITION:
         mission = LAB_MISSION_CONDITION[name]
         all_of.append(cleared_event(mission) if mission == FUTURE_OF_HYRULE else challenge_event(mission))
-    if (name in LAB_RUNE_CONDITION and world.options.sheikah_runes == SheikahRunes.option_shuffled
-            and LAB_RUNE_CONDITION[name] in world.item_runes):  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
-        all_of.append(rune_item(LAB_RUNE_CONDITION[name]))
+    if name in LAB_RUNE_CONDITION:
+        all_of += rune_needs(world, [LAB_RUNE_CONDITION[name]])
     if name in LAB_ROD_CONDITION and world.options.rod_items:
         all_of.append(LAB_ROD_CONDITION[name])
     if name in LAB_WEAPON_CONDITION:
@@ -135,7 +134,9 @@ def challenge_requirements(world: AgeOfCalamityWorld, name: str) -> list[str]:
         gate = challenge_gate(name, by_level, world.boss_goal)
         required = [cleared_event(gate) if gate else POST_STORY_EVENT]
     if name in RUNE_CHALLENGES:
-        required += rune_needs(world, [RUNE_CHALLENGES[name]])  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
+        required += rune_needs(world, RUNE_CHALLENGES[name])  # (0.9.58-0.9.88 seeds: Remote Bombs always on)
+    if world.options.rod_items:
+        required += ROD_CHALLENGES.get(name, ())
     required += [quest_event(q) for q in world.challenge_quests.get(name, ())]  # the game's own quest gate
     if world.fairy_locked and name in FEATURE_CHALLENGES["Fairy Fountains"]:
         required.append("Feature: Fairy Fountains")
@@ -167,6 +168,7 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
             required = tuple(cleared_event(world.slot_to_mission[p]) if p in world.slot_to_mission else challenge_event(p)
                              for p in world.slot_prerequisites[slot])  # (Story Only: a DLC story mission can come before)
         required += tuple(character_item(c) for c in world.mission_party.get(mission, ()))
+        required += tuple(rune_needs(world, MISSION_RUNES.get(mission, ())))  # (an objective only that rune completes)
         if mission == CALAMITY:  # also all four Champions yours (a Champion you don't have would be trapped)
             required += tuple(character_item(c) for c in CHAMPIONS)
         party = [character_item(c) for c in world.party_needs.get(mission, ())]  # any hero it lets you pick
@@ -287,10 +289,10 @@ def set_all_rules(world: AgeOfCalamityWorld) -> None:
 
     for source, kind, index in world.checked_koroks:
         gate = cleared_event(source) if kind == "mission" else challenge_event(source)  # also its unlock (item)
-        needs = [gate] + rune_needs(world, KOROK_RUNES.get(source, ()))  # a rune never sits behind itself
+        needs = [gate] + rune_needs(world, KOROK_RUNES.get((source, index), ()))  # a rune never sits behind itself
         set_rule(world.get_location(korok_location(source, index)), _rule(player, needs))
     for mission, index in world.checked_chests:
-        runes = rune_needs(world, CHEST_RUNES_ALL + CHEST_RUNES.get(mission, ()))  # half-buried chests: Magnesis
+        runes = rune_needs(world, CHEST_RUNES.get((mission, index), ()))
         if mission in DLC_CHESTS:  # an Expansion Pass story mission (a challenge to the world); a shared stage: either one
             other = SHARED_CHESTS.get(mission)
             events = [challenge_event(mission)] + ([challenge_event(other)] if other in world.active_challenges else [])

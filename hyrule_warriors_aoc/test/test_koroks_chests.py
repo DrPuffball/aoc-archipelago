@@ -43,21 +43,21 @@ class TestRuneLogic(AoCTestBase):
 
     def test_korok_needs_stasis(self) -> None:
         self.collect_all_but(["Rune: Stasis"])
-        self.assertFalse(self.can_reach_location("Korok Seed: Revali, the Rito Warrior #1"))
+        self.assertFalse(self.can_reach_location("Korok Seed: Revali, the Rito Warrior #7"))
         self.assertTrue(self.can_reach_location("Korok Seed: Mipha, the Zora Princess #1"))
         self.collect_by_name("Rune: Stasis")
-        self.assertTrue(self.can_reach_location("Korok Seed: Revali, the Rito Warrior #1"))
+        self.assertTrue(self.can_reach_location("Korok Seed: Revali, the Rito Warrior #7"))
 
     def test_chest_needs_magnesis(self) -> None:
         self.collect_all_but(["Rune: Magnesis"])
-        self.assertFalse(self.can_reach_location("Treasure Chest: Mipha, the Zora Princess #1"))
+        self.assertFalse(self.can_reach_location("Treasure Chest: Road to the Ancient Lab #2"))
         self.assertTrue(self.can_reach_location("Korok Seed: Mipha, the Zora Princess #1"))
         self.collect_by_name("Rune: Magnesis")
-        self.assertTrue(self.can_reach_location("Treasure Chest: Mipha, the Zora Princess #1"))
+        self.assertTrue(self.can_reach_location("Treasure Chest: Road to the Ancient Lab #2"))
 
     def test_chest_needs_bombs(self) -> None:
         self.collect_all_but(["Rune: Remote Bombs"])
-        self.assertFalse(self.can_reach_location("Treasure Chest: Calamity Strikes #1"))
+        self.assertFalse(self.can_reach_location("Treasure Chest: Calamity Strikes #7"))
         self.assertTrue(self.can_reach_location("Treasure Chest: Mipha, the Zora Princess #1"))
 
 

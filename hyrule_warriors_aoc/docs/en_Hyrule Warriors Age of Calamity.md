@@ -112,8 +112,8 @@ knows it). `region_hope_checks` makes each region's 100% "Hope" quest a check.
 ## Korok seeds, chests and progress checks
 
 `korok_checks` and `chest_checks` (on by default) make every Korok seed ("Korok Seed: <mission> #n") and treasure chest
-("Treasure Chest: <mission> #n") a check, sent the moment you find it. Seeds and chests that need a rune (Stasis
-targets, bombable rocks, half-buried chests) expect that rune first.
+("Treasure Chest: <mission> #n") a check, sent the moment you find it. The 14 seeds and 14 chests that need a
+rune (see "Sheikah Slate runes") expect that rune first; the others only need their mission.
 
 Off by default ("Progress Checks" group):
 - `hero_level_checks`: a check per hero every `hero_level_check_interval` levels up to `hero_level_check_max`
@@ -133,6 +133,26 @@ Off by default ("Progress Checks" group):
 `sheikah_runes` (default `shuffled`): all four runes from the start (`start_with_all`), `shuffled` (each rune is an item, Remote
 Bombs too) or `vanilla` (from the story: Remote Bombs and Cryonis in The Battle of Hyrule Field, Magnesis and Stasis in
 Road to the Ancient Lab).
+
+Some missions can't be finished without a rune, and logic waits for it:
+
+- **Remote Bombs:** Revali, the Rito Warrior; Urbosa, the Gerudo Chief; When Courage Fails; Fleeing the Weather.
+- The matching rune for each Mastering challenge, and all four runes for EX Battle Research: Items.
+- If rods are items: the Fire Rod for EX Battle Research: Items and the Ice Rod for EX The Budget Battle.
+- Royal Ancient Lab (`lab_checks`): Remote Bombs for Power Play: Bombs Away, Magnesis for Magnetic Mayhem, Stasis for Go
+  with the Flow, Cryonis for Nice and Icy, and the Fire Rod (if rods are items) for An Apple a Day.
+
+Korok seeds and treasure chests that need one (the numbers are the ones in their check names):
+
+| Rune | Korok seeds | Treasure chests |
+|---|---|---|
+| Remote Bombs | Revali #8, Urbosa #9, The Road Home, Besieged #3, Calamity Strikes #5, Air and Lightning #5, The Great Plateau #7, Defend Hyrule Castle #1 | Calamity Strikes #7, The Future of Hyrule #7 and #8 |
+| Stasis | Revali #7, Urbosa #7, Destroy the Yiga Clan! #2, When Courage Fails #1, Water and Fire #2, Air and Lightning #4, All Hyrule, United #6 | none |
+| Magnesis | none | Road to the Ancient Lab #2 and #6, Revali #3, Urbosa #9, The Yiga Clan Attacks! #8, The Road Home, Besieged #9, When Courage Fails #8, Air and Lightning #9, The Great Plateau #10, EX Battle of Goponga Village #5, EX Battle for Kakariko Village #6 |
+
+Universal Tracker uses the same logic. A mission that needs a rune is never one you start with, and `/todo`
+marks a story mission you can't finish yet.
+
 The unmodded game hands runes out whenever those story missions count as cleared, so the client installs a small game
 patch (the "AoC Archipelago" mod for game version 1.4.1, which also does the frame rates below) into Eden's and Ryujinx's mod folders while the emulator is
 closed. With it, the game shows exactly the runes the client gives. Start the client before the game.

@@ -15,15 +15,17 @@ from .data import (
     MISSIONS,
     GLOBAL_UPGRADES,
     ITEM_ID_BASE,
+    ROD_CHALLENGES,
     RUNE_CHALLENGES,
     ITEM_RUNES,
+    MISSION_RUNES,
     APPLES,
     RODS,
     RUNES,
     WEAPONS,
 )
 
-from .data_chests import CHEST_RUNES, CHEST_RUNES_ALL
+from .data_chests import CHEST_RUNES
 from .data_koroks import KOROK_RUNES
 from .data_lab import LAB_ITEMS
 from .data_rewards import DIRECT_GROUPS, INDIVIDUAL_GROUPS, REWARD_BY_ITEM, REWARD_GROUPS
@@ -114,13 +116,17 @@ def classify(world: AgeOfCalamityWorld, name: str) -> ItemClassification:
         # Characters only matter to logic through restricted challenges, quests and weapon checks.
         return ItemClassification.progression if world.characters_matter else ItemClassification.useful
     if name.startswith("Rune: "):
-        # Progression only when a rune challenge, or a checked Korok seed or chest (0.9.90), needs this rune.
+        # Progression only when a story mission, a rune challenge, or a checked Korok seed or chest needs this rune.
         rune = name[len("Rune: "):]
-        needed = {RUNE_CHALLENGES[c] for c in world.active_challenges if c in RUNE_CHALLENGES}
-        needed |= {r for s, _, _ in getattr(world, "checked_koroks", ()) for r in KOROK_RUNES.get(s, ())}
-        if getattr(world, "checked_chests", ()):
-            needed |= set(CHEST_RUNES_ALL) | {r for m, _ in world.checked_chests for r in CHEST_RUNES.get(m, ())}
+        needed = {r for c in world.active_challenges for r in RUNE_CHALLENGES.get(c, ())}
+        needed |= {r for m in world.mission_order for r in MISSION_RUNES.get(m, ())}
+        needed |= {r for s, _, n in getattr(world, "checked_koroks", ()) for r in KOROK_RUNES.get((s, n), ())}
+        needed |= {r for c in getattr(world, "checked_chests", ()) for r in CHEST_RUNES.get(tuple(c), ())}
         return ItemClassification.progression if rune in needed else ItemClassification.useful
+    if name in RODS:
+        needed_by = any(name in ROD_CHALLENGES.get(c, ()) for c in world.active_challenges)
+        if needed_by:
+            return ItemClassification.progression
     if name.startswith(UNLOCK_PREFIX):
         return ItemClassification.progression
     if name in getattr(world, "reward_progression", ()):  # an item a checked quest or challenge waits on

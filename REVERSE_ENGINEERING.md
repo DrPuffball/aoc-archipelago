@@ -241,11 +241,6 @@ quests needed). The client rewrites rows of these tables to change unlock order.
 - Story clear rewards [LinkData2 009cba94]: the second list (`+0x10` counts, `+0x32` ids) is 10 each of five
   everyday materials per mission; the first list (`+0x04`/`+0x24`) holds the gems and other first-clear rewards.
 - Weapon levels: record byte `+0x78` = level - 1; weapon kind u16 `+0x10` (0 = empty slot); first pool used.
-- Runes for Koroks and chests [guides, 2026-11-18; not checked in game]: Nintendo Life's Korok list names Stasis
-  (floating targets) and bombs (rock piles, cracked walls, a tree) in 11 story missions and Defend Hyrule Castle; its
-  numbers are the writer's find order, not the save slots. Some chests are half-buried (Magnesis pulls them out);
-  Remote Bombs open a chest behind rocks in Revali (Game8) and one behind a cracked wall in Calamity Strikes. Logic
-  table: data_koroks.KOROK_RUNES, data_chests.CHEST_RUNES(_ALL).
 
 ---
 
@@ -303,6 +298,116 @@ Remote Bombs and Cryonis behave the same way with The Battle of Hyrule Field (re
 inside that mission [confirmed 2026-10-28]. Ruled out for Magnesis/Stasis: the rune upgrade counters (profile
 `+0x7A1..+0x7A4` zeroed, no change) and story flag 0x15 (zeroed, no change; it makes the world map replay a
 cutscene and gives Road to the Ancient Lab its first-time intro text).
+
+### Where a rune or rod is required [game data, all 233 missions, 2026-11-23]
+**Archive.** `data/LinkData2.bin` is indexed by `data/LinkInfo2.bin`: 7857 entries of 40 bytes (u64 offset, size, stored
+size, compressed flag, hash). Compressed entries: u32 chunk size, chunk count, total, chunk sizes, then zlib chunks on
+128-byte boundaries (each with a 4-byte length). 2266 entries are stored raw, the mission scenarios among them (a scan
+for zlib headers misses them). Entry numbers below are LinkInfo2 indices.
+
+**Mission order in per-mission tables:** story records 1-28, then challenges 100-266 without the six records whose stage
+byte is 0 (193, 194, 235, 239, 243, 248), then 300-307, 320-330, 350-374: 233 in all. Stage id = byte +59 of the mission
+parameter table (400 rows x 104).
+
+**Texts.** Objectives 0x94a094 (300 rows, stride 12), messages 0x9dcb94 (2000 rows, stride 16). Per mission, 20 objective
+rows (6 u16: objective id, name ids; 299 = none) and 128 message rows (99 = none). Name ids: 300+ = places (0x83f714),
+601+ = things (Magnesis 675, Stasis 676, Remote Bomb 677, Cryonis 678, rods 680-682, weak-point smash 708, perfect
+dodge 709, special attack 710, rune counter 711, fire/ice/lightning 712-714). Ids 0/5 ("Use a Fire Rod") only appear as
+blank rows. Named in objectives: Urbosa and When Courage Fails (Remote Bombs), EX Battle Research: Skills (weak-point hit
+and smash, perfect dodge, special attack), EX Battle Research: Items (fire, rune counter, Remote Bomb), EX The Budget
+Battle (ice, weak-point smash, special attack). Named in messages only: the four Mastering challenges ("Use Cryonis and
+defeat ...") and Fleeing the Weather ("Use Remote Bombs to topple trees"; guides describe no such step).
+Explosive-Handle With Care names bomb barrels, not a rune. EX The Yiga Clan's Retreat gives Kohga the Slate mid-mission.
+
+**Mission scenarios** (raw, entry 689 + 8 * mission index): +0 units (120 x 13 i32), +1 (26 x 10), +4 (64 x 2), +5 objects
+(100 x 10), **+6 gimmick states (100 x 3 i32: gimmick number, state, value; -2147483648 = none)**, +7 the script.
+States seen: 0/1 off/on, 2 removed, 3 whole (the script or an attack breaks it), **5 whole, must be broken**.
+
+**Stage layouts** (DJBO, entry 7811 + stage - 1): header u16 version, n nodes, n2, m instances; nodes from 0x20 (96 bytes;
+u16 kind at +86, flags at +88); instances are the last 64 * m bytes (scale, rotation, position, then u16 gimmick number,
+u16, u16 node, **u16 collectible number**, hash). Kinds: 10 updraft, **14 bombable rock or cracked wall**, 25 toppling tree
+(When Courage Fails), **36 treasure chest** (counts match every mission; collectible number = chest slot), 38 + 43
+monster lookout + skull chest, **58 rock over a Korok** (collectible number = Korok table row).
+- Kind 14: Revali 2, exactly on the updrafts at (46078, 57238) and (88996, 65397), both state 5 with the updrafts off:
+  the mission can't be finished without Remote Bombs. Air and Lightning 2, on both updrafts, state 2 (removed): no bombs.
+  Calamity Strikes and The Future of Hyrule: the same 4 cracked walls, side rooms only.
+- No other mission has a kind 14 or 25 object in state 3/5 in its way (Yunobo's Training has the trees, unused).
+
+**Koroks** (entry 3878, 600 rows x 20; row = 20 * mission + slot + 1, challenges 401-412): u32 x, u32 z, u16 group, u16
+stage (challenge record from 401), u16 angle, 2 grid bytes, kind, level, u16 in use. Kinds: 2 crate, 10 stump, 11
+pinwheel, 12 flower, 13 still balloon, 14 light, **15 moving target (Stasis)**, **0 under a bomb rock**. The in-use
+column equals the seed slots found live, for all 20 missions.
+**Chests** (0x7f9314, 10 rows per block x 16): weapon id, amount, stage, slot, map square, item, **u16 +12 = buried
+(Magnesis)**, set on 11 chests: exactly those the Zelda Dungeon wiki lists as Magnesis. Contents match that wiki's list in
+order for every block, so the wiki's order is the slot order.
+Cracked walls hide Korok 5 and chest 7 of Calamity Strikes, chests 7 and 8 of The Future of Hyrule, and the seed of Defend
+Hyrule Castle (within 1000 units of a wall; the next nearest item is over 1900 away).
+Tables: data.MISSION_RUNES / RUNE_CHALLENGES / ROD_CHALLENGES, data_koroks.KOROK_RUNES, data_chests.CHEST_RUNES.
+Guides agree: Game8 and GameFAQs (Revali, Urbosa, When Courage Fails), Zelda Dungeon (per-chest and per-seed lists).
+
+Full data: `tools/rune_audit/` (koroks.json, chests.json with positions and contents, mission_gimmicks.json = every mission's
+gimmick states, stage_objects.json), written by `build_research.py`, which also checks the world's tables against the game.
+
+Every Korok seed, by its check number (= slot order):
+
+| Mission or challenge | Seeds |
+|---|---|
+| The Battle of Hyrule Field | 1 crate, 2 still balloon, 3 flower, 4 flower, 5 flower, 6 stump, 7 pinwheel |
+| Road to the Ancient Lab | 1 stump, 2 light, 3 still balloon, 4 flower, 5 flower, 6 pinwheel |
+| Mipha, the Zora Princess | 1 still balloon, 2 flower, 3 pinwheel, 4 pinwheel |
+| Daruk, the Goron Hero | 1 stump, 2 pinwheel, 3 flower, 4 pinwheel, 5 stump, 6 pinwheel, 7 light, 8 light |
+| Revali, the Rito Warrior | 1 stump, 2 pinwheel, 3 stump, 4 light, 5 flower, 6 pinwheel, 7 moving target **(Stasis)**, 8 under a bomb rock **(Remote Bombs)** |
+| Urbosa, the Gerudo Chief | 1 flower, 2 pinwheel, 3 light, 4 light, 5 crate, 6 pinwheel, 7 moving target **(Stasis)**, 8 pinwheel, 9 under a bomb rock **(Remote Bombs)** |
+| The Yiga Clan Attacks! | 1 flower, 2 stump, 3 still balloon, 4 flower, 5 light, 6 pinwheel, 7 flower, 8 stump |
+| Freeing Korok Forest | 1 crate, 2 flower, 3 pinwheel, 4 flower, 5 pinwheel, 6 flower, 7 pinwheel, 8 still balloon, 9 flower, 10 flower |
+| The Road Home, Besieged | 1 pinwheel, 2 flower, 3 under a bomb rock **(Remote Bombs)** |
+| Akkala Tower | 1 flower, 2 pinwheel, 3 light, 4 stump, 5 pinwheel |
+| Destroy the Yiga Clan! | 1 flower, 2 moving target **(Stasis)**, 3 pinwheel, 4 crate, 5 light, 6 crate, 7 pinwheel, 8 light |
+| When Courage Fails | 1 moving target **(Stasis)**, 2 flower, 3 light, 4 pinwheel, 5 crate |
+| Calamity Strikes | 1 stump, 2 crate, 3 pinwheel, 4 crate, 5 pinwheel **(Remote Bombs)**, 6 light, 7 pinwheel |
+| Water and Fire | 1 flower, 2 moving target **(Stasis)**, 3 crate |
+| Air and Lightning | 1 flower, 2 flower, 3 stump, 4 moving target **(Stasis)**, 5 under a bomb rock **(Remote Bombs)** |
+| Relentless as a Waterfall | 1 pinwheel, 2 crate, 3 light, 4 stump, 5 flower, 6 pinwheel |
+| Each Step Like Thunder | 1 pinwheel, 2 flower, 3 flower, 4 stump |
+| The Great Plateau | 1 pinwheel, 2 flower, 3 stump, 4 pinwheel, 5 flower, 6 crate, 7 under a bomb rock **(Remote Bombs)** |
+| All Hyrule, United | 1 pinwheel, 2 stump, 3 flower, 4 crate, 5 pinwheel, 6 moving target **(Stasis)** |
+| The Future of Hyrule | 1 stump, 2 pinwheel, 3 flower |
+| Innkeeper's Request | 1 pinwheel |
+| Mipha's Training | 1 flower |
+| Anti-Ice Training: II | 1 pinwheel |
+| Defend Zora's Domain | 1 pinwheel |
+| Elemental Uproar | 1 stump, 2 flower |
+| Polishing His Technique | 1 pinwheel |
+| Winged Escort | 1 stump |
+| Cross the Hebra Mountains | 1 crate |
+| Hunting Partners | 1 flower |
+| Hair-Width Trial: Expert+ | 1 still balloon |
+| Defend Hyrule Castle | 1 pinwheel **(Remote Bombs)** |
+
+Chests that need a rune (the other 167 need none), x and z in stage units:
+
+| Mission | Chest | Rune | Why | Position |
+|---|---|---|---|---|
+| Road to the Ancient Lab | #2 | Magnesis | buried | 83813, 69440 |
+| Road to the Ancient Lab | #6 | Magnesis | buried | 68039, 59988 |
+| Revali, the Rito Warrior | #3 | Magnesis | buried | 61527, 67261 |
+| Urbosa, the Gerudo Chief | #9 | Magnesis | buried | 75439, 47857 |
+| The Yiga Clan Attacks! | #8 | Magnesis | buried | 44204, 73950 |
+| The Road Home, Besieged | #9 | Magnesis | buried | 86409, 57537 |
+| When Courage Fails | #8 | Magnesis | buried | 90095, 86456 |
+| Calamity Strikes | #7 | Remote Bombs | behind a cracked wall | 72827, 57517 |
+| Air and Lightning | #9 | Magnesis | buried | 68448, 35010 |
+| The Great Plateau | #10 | Magnesis | buried | 71221, 106683 |
+| The Future of Hyrule | #7 | Remote Bombs | behind a cracked wall | 72838, 57514 |
+| The Future of Hyrule | #8 | Remote Bombs | behind a cracked wall | 71892, 54398 |
+| EX Battle of Goponga Village | #5 | Magnesis | buried | 70201, 57411 |
+| EX Battle for Kakariko Village | #6 | Magnesis | buried | 37285, 84217 |
+
+How it was found (for the next hunt): index the archive properly first (LinkInfo2; the zlib scan missed 2266 entries), look
+for tables whose in-use column equals a mask already known from live play (seed slots, chest counts), then place objects by
+position. Dead ends: the 360-byte tables at 0x69ba14 (attack data), the 0x17c tables (area map, run-length), DJBO alone
+for Koroks (only the rock ones are placed there), ALGB (AI graphs), the guides' mission texts for forced obstacles (Revali's
+rocks are in no text, wiki objective list or message).
 
 ### The story flag check and the rune mod [confirmed on Eden, 2026-11-14]
 - `isStoryFlagSet(id)` = text `0x757E50` (main NSO, v1.4.1 build E5F275B5...): returns "the flag's linked mission record
@@ -475,6 +580,9 @@ cutscene and gives Road to the Ancient Lab its first-time intro text).
   `+0x3C` ally given, `+0x3D` bonus weapon type, `+0x3E` weapon capacity bonus.
 - Condition types, in text order: 1 defeat with weapon type, 2 copy weapons, 3 perfect dodges, 4 Remote Bomb kills, 5 Magnesis throw-backs,
   6 Stasis stops, 7 Cryonis freezes, 8 complete a mission, 9 fire rod kills.
+- The same table on disk: LinkData2 entry 4192 (101 rows x 64, row = node + 1), condition type at +0x2B. Runes and rods are in
+  exactly five nodes: 22 An Apple a Day (Fire Rod), 26 Bombs Away, 27 Magnetic Mayhem, 28 Go with the Flow, 29 Nice and Icy;
+  the other conditions are missions (0, 32, 33) and lab weapons (4, 6, 10, 12) [checked against data_lab, 2026-11-23].
 - The client keeps kill-count conditions in a normal game; it clears none. The two relic nodes ask for The Future of Hyrule, so they hold no checks when that mission is the goal.
 - Clearing target AND type (`+0x1B`, `+0x3A`, `+0x3B`) makes a conditioned node buy like a plain one, reward included. Clearing only
   the target shows the reward screen, but the purchase changes nothing.

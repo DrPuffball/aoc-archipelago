@@ -823,7 +823,7 @@ class RuneTests(unittest.TestCase):
         from ..data import ENFORCED_RUNES, RUNE_CHALLENGES, RUNES
         from ..data_challenges import CHALLENGE_BY_NAME
         self.assertTrue(set(RUNE_CHALLENGES) <= set(CHALLENGE_BY_NAME))
-        self.assertTrue(set(RUNE_CHALLENGES.values()) <= set(RUNES) and set(ENFORCED_RUNES) <= set(RUNES))
+        self.assertTrue({r for runes in RUNE_CHALLENGES.values() for r in runes} <= set(RUNES) and set(ENFORCED_RUNES) <= set(RUNES))
 
 
 class QuestRewardHookTests(unittest.TestCase):

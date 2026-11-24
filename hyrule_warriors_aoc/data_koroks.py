@@ -104,20 +104,23 @@ def korok_flags() -> list[tuple[str, int, int]]:
                   for c, slots in CHALLENGE_KOROK_SLOTS.items() for n, s in enumerate(slots)]
 
 
-# Runes a mission's Korok seeds may need (0.9.90). Nintendo Life's Korok guide (read 2026-11-18) names Stasis for floating
-# targets and bombs for rock piles, cracked walls and trees. Its numbering is the order the writer found the seeds, not
-# the game's slot order, so every seed of the mission needs the rune (demand more when unsure). Other missions: none named.
-KOROK_RUNES: dict[str, tuple[str, ...]] = {
-    "Revali, the Rito Warrior": ("Stasis", "Remote Bombs"),
-    "Urbosa, the Gerudo Chief": ("Remote Bombs",),
-    "The Yiga Clan Attacks!": ("Stasis",),
-    "The Road Home, Besieged": ("Remote Bombs",),
-    "Destroy the Yiga Clan!": ("Stasis",),
-    "When Courage Fails": ("Stasis", "Remote Bombs"),
-    "Calamity Strikes": ("Remote Bombs",),
-    "Water and Fire": ("Stasis",),
-    "Air and Lightning": ("Stasis", "Remote Bombs"),
-    "The Great Plateau": ("Remote Bombs",),
-    "All Hyrule, United": ("Stasis",),
-    "Defend Hyrule Castle": ("Remote Bombs",),  # challenge: behind a bomb-able wall
+# The rune each Korok seed needs, by (mission or challenge, number) [game data 2026-11-23: the Korok table, LinkData2 entry
+# 3878, row 20 * mission + slot + 1: kind 15 = moving target (Stasis), 0 = under a bomb rock; the seeds behind cracked
+# walls (Calamity Strikes, Defend Hyrule Castle) by position]. Every other kind (stump, pinwheel, flower, still balloon,
+# light, crate) needs none.
+KOROK_RUNES: dict[tuple[str, int], tuple[str, ...]] = {
+    ("Revali, the Rito Warrior", 7): ("Stasis",),
+    ("Revali, the Rito Warrior", 8): ("Remote Bombs",),
+    ("Urbosa, the Gerudo Chief", 7): ("Stasis",),
+    ("Urbosa, the Gerudo Chief", 9): ("Remote Bombs",),
+    ("The Road Home, Besieged", 3): ("Remote Bombs",),
+    ("Destroy the Yiga Clan!", 2): ("Stasis",),
+    ("When Courage Fails", 1): ("Stasis",),
+    ("Calamity Strikes", 5): ("Remote Bombs",),
+    ("Water and Fire", 2): ("Stasis",),
+    ("Air and Lightning", 4): ("Stasis",),
+    ("Air and Lightning", 5): ("Remote Bombs",),
+    ("The Great Plateau", 7): ("Remote Bombs",),
+    ("All Hyrule, United", 6): ("Stasis",),
+    ("Defend Hyrule Castle", 1): ("Remote Bombs",),
 }

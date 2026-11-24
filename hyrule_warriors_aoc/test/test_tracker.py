@@ -1,11 +1,13 @@
 import json
+import random
 import unittest
 
 from BaseClasses import CollectionState
 from test.general import setup_solo_multiworld
 from worlds.AutoWorld import AutoWorldRegister, call_all
 
-from ..items import character_item, unlock_item
+from ..data import RODS, RUNES
+from ..items import character_item, rune_item, unlock_item
 
 GAME = "Hyrule Warriors Age of Calamity"
 UT_STEPS = ("generate_early", "create_regions", "create_items", "set_rules", "connect_entrances", "generate_basic")
@@ -49,6 +51,27 @@ class TrackerRegenTests(unittest.TestCase):
                 state.sweep_for_advancements()
                 states.append({loc.name for loc in mw.get_locations(1) if loc.address is not None and loc.can_reach(state)})
             self.assertEqual(states[0], states[1])
+        # ... and with any part of the seed's items: everything but one rune or rod, and random parts
+        pool = [i.name for i in real.itempool if i.player == 1] + [i.name for i in real.precollected_items[1]]
+        rng = random.Random(seed)
+        parts = [[n for n in pool if n != held] for held in (*(rune_item(r) for r in RUNES), *RODS, "")]
+        parts += [rng.sample(pool, len(pool) * k // 8) for k in range(1, 8)]
+        for part in parts:
+            reach = []
+            for mw in (real, fake):
+                state = CollectionState(mw)
+                for name in part:
+                    state.collect(mw.worlds[1].create_item(name), True)
+                state.sweep_for_advancements([loc for loc in mw.get_locations(1) if loc.address is None])
+                reach.append({loc.name for loc in mw.get_locations(1) if loc.address is not None and loc.can_reach(state)})
+            self.assertEqual(reach[0], reach[1])
+
+    def test_runes_everywhere(self) -> None:
+        for runes in ("shuffled", "vanilla", "start_with_all"):
+            for unlocks in ("items", "story_order"):
+                self.check({"sheikah_runes": runes, "mission_unlocks": unlocks, "include_dlc": True, "rod_items": True,
+                            "korok_checks": True, "chest_checks": True, "lab_checks": True,
+                            "first_mission": "random_any"}, 11)
 
     def test_default_options(self) -> None:
         for seed in (1, 2):

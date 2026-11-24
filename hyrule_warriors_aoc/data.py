@@ -361,9 +361,22 @@ RODS = ["Fire Rod", "Ice Rod", "Lightning Rod"]
 # + 0x92C (read by the palette code at text 0xf5a708) [read live: 5 with the user's apple capacity].
 APPLES = "Apples"
 PALETTE_ITEMS = [*RODS, APPLES]  # client lock order; counter offsets in client.live_hook.PALETTE_USES
-RUNE_CHALLENGES = {"Mastering Remote Bombs": "Remote Bombs", "Mastering Cryonis": "Cryonis",
-                   "Mastering Magnesis": "Magnesis", "Mastering Stasis": "Stasis",
-                   "Explosive—Handle With Care": "Remote Bombs"}
+# Challenges that can't be finished without a rune [game data 2026-11-23: each mission's objective and battle message
+# lists; REVERSE_ENGINEERING.md "Where a rune or rod is required"]. EX Battle Research: Items: "Attack with fire", "Use
+# rune counter" (which rune is not known: all four), "Defeat with Remote Bomb". Fleeing the Weather: its message list has
+# "Use Remote Bombs to topple trees"; guides don't mention it (demand more when unsure).
+RUNE_CHALLENGES = {"Mastering Remote Bombs": ("Remote Bombs",), "Mastering Cryonis": ("Cryonis",),
+                   "Mastering Magnesis": ("Magnesis",), "Mastering Stasis": ("Stasis",),
+                   "Fleeing the Weather": ("Remote Bombs",),
+                   "EX Battle Research: Items": tuple(RUNES)}
+# EX The Budget Battle: "Attack the Meteo Wizzrobe with ice". With rod_items the rod is an item.
+ROD_CHALLENGES = {"EX Battle Research: Items": ("Fire Rod",), "EX The Budget Battle": ("Ice Rod",)}
+# Story missions that can't be finished without a rune (Discord, 2026-11-23: a 0.9.89 player was stuck in Urbosa's):
+# Revali's two updrafts are under bomb rocks (gimmick kind 14, state 5), Urbosa's objective is "Defeat <Yiga> with Remote
+# Bombs", When Courage Fails' is "Topple the trees using Remote Bombs". No other mission, Expansion Pass ones included,
+# has a rock in its way (Air and Lightning has the same rocks on its updrafts, switched off) [all 233 checked].
+MISSION_RUNES = {"Revali, the Rito Warrior": ("Remote Bombs",), "Urbosa, the Gerudo Chief": ("Remote Bombs",),
+                 "When Courage Fails": ("Remote Bombs",)}
 
 # ---------------------------------------------------------------------------------------
 # Filler (repeatable; the hook decides what each grants)

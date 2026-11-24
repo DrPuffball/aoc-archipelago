@@ -62,7 +62,8 @@ most people change:
 - "Open from the Start" group: Sheikah Sensor, stables, shops and the dye shop open from the start (on), trackers (off).
 - `hint_mission_unlocks`, `hint_heroes`: free hints at the start. `hero_level_cap`: heroes stay at 99.
 - `sheikah_runes`: `shuffled` (default) = all four runes, Remote Bombs included, are items (uses the game mod);
-  `start_with_all` or `vanilla`.
+  `start_with_all` or `vanilla`. Remote Bombs are needed to finish Revali, the Rito Warrior; Urbosa, the Gerudo Chief;
+  and When Courage Fails; logic knows this and every other place a rune is required.
 - `frame_rate` (experimental): `off` (default, the game's own 30), `fps_60`, `fps_120` or `unlimited`. Above 30 the
   game stays at real speed however many frames your PC manages. Change it any time in the client's Options tab or with
   `/fps`.

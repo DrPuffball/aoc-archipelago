@@ -25,7 +25,10 @@ class AoCTestBase(WorldTestBase):
         self.multiworld.state.sweep_for_advancements()
 
     def collect_champions(self) -> None:
-        """Calamity Strikes needs Mipha, Daruk, Revali and Urbosa (those not among the starters)."""
+        """Calamity Strikes needs Mipha, Daruk, Revali and Urbosa (those not among the starters); two missions need
+        Remote Bombs (data.MISSION_RUNES)."""
+        if "Remote Bombs" in self.world.item_runes:
+            self.collect_by_name("Rune: Remote Bombs")
         names = [f"Character: {c}" for c in ("Mipha", "Daruk", "Revali", "Urbosa")
                  if c not in self.world.starting_characters]
         if names:
@@ -47,7 +50,7 @@ class TestDefaults(AoCTestBase):
         self.assertTrue(set(self.world.starting_characters) <= set(BASE_CHARACTERS))
 
     def test_story_needs_only_the_champions(self) -> None:
-        # Any heroes can play the story missions; Calamity Strikes alone needs the four Champions.
+        # Any heroes can play the story missions; Calamity Strikes alone needs the four Champions, two others Remote Bombs.
         self.assertTrue(self.can_reach_location(f"Clear: {self.world.mission_order[0]}"))  # first_mission's pick
         self.assertFalse(self.can_reach_location(f"Event: Cleared {self.world.mission_order[-1]}"))
         self.collect_champions()
@@ -67,7 +70,7 @@ class TestDefaults(AoCTestBase):
         self.assertIn("Quest: Hyrule Swordfighting Academy", names)
 
     def test_finishing_requires_every_mission(self) -> None:
-        # The main story needs only the four Champions (Calamity Strikes) besides clearing every mission in order.
+        # The main story needs only the four Champions (Calamity Strikes) and Remote Bombs besides clearing every mission in order.
         self.collect_champions()
         self.assertBeatable(True)
 
