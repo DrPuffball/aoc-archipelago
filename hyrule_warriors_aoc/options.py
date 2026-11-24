@@ -770,7 +770,7 @@ class SheikahRunes(Choice):
     Start With All: all four from the start.
 
     Some missions, challenges, Korok seeds, chests and lab nodes can't be done without a certain rune (Remote Bombs for
-    Revali, Urbosa and When Courage Fails, for example). Logic waits for it, and you never start with such a mission.
+    Revali, Urbosa and When Courage Fails, for example). Logic makes sure the rune is reachable first.
     """
 
     display_name = "Sheikah Slate Runes"

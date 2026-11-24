@@ -299,7 +299,7 @@ class AgeOfCalamityWorld(World):
             self.slot_to_mission, self.slot_prerequisites, self.mission_order = {first: first}, {first: ()}, [first]
             pick = first
         # With unlock items the story has no order: the player starts with a few unlocks for early missions.
-        early = [m.name for m in MISSIONS[lo:] if m.chapter <= 2 and m.name != pick and not self._needs_rune(m.name)]
+        early = [m.name for m in MISSIONS[lo:] if m.chapter <= 2 and m.name != pick]
         count = min(options.starting_mission_unlocks.value, len(early) + 1) if unlock_items else 0
         if count == 1 and options.story_party == StoryParty.option_vanilla:
             # Fixed parties leave a single starting mission (one check) to begin the fill from: about 4 in 5 such seeds
@@ -591,12 +591,14 @@ class AgeOfCalamityWorld(World):
 
     def _pick_starting_challenges(self) -> list[str]:
         """Challenges Only with challenge unlock items: there is no story to find the first items in, so a few
-        challenges start unlocked. Only ones playable at once: nothing needed but their unlock item and your heroes."""
+        challenges start unlocked. Only ones whose heroes you have; a rune or rod one may need is left to the logic (at most
+        a few of the 12, so there is always something to play)."""
         if self.game_mode != GameMode.option_challenges_only or not self.challenge_item_unlocks:
             return []
         start = {items.character_item(c) for c in self.starting_characters}
         ready = [c for c in self.challenge_item_unlocks if not CHALLENGE_BY_NAME[c].is_ex  # (works without the DLC)
-                 and all(r == items.unlock_item(c) or r in start for r in rules.challenge_requirements(self, c))]
+                 and all(r == items.unlock_item(c) or r in start or r.startswith("Rune: ") or r in RODS
+                         for r in rules.challenge_requirements(self, c))]
         if len(ready) < CHALLENGES_ONLY_ITEM_START:
             raise OptionError(f"{self.player_name}: too few challenges are playable at the start for challenge "
                               f"unlock items ({len(ready)}).")
@@ -661,14 +663,13 @@ class AgeOfCalamityWorld(World):
         return mission in MISSION_RUNES and self.options.sheikah_runes != SheikahRunes.option_start_with_all
 
     def _keep_rune_missions_playable(self, order: list[str], lo: int, in_order: bool) -> None:
-        """A mission that needs a rune is never one you start with, and where missions open in order never one of the
-        first two (the only checks before them). With vanilla runes The Battle of Hyrule Field hands Remote Bombs out, so
-        in an ordered story it comes before them (or they would wait on each other)."""
-        for i in range(lo, min(2 if in_order else lo + 1, len(order))):
-            if self._needs_rune(order[i]):
-                j = self.random.choice([k for k in range(2, len(order)) if not self._needs_rune(order[k])
-                                        and order[k] not in CHAINED_MISSIONS and order[k] != FINAL_MISSION])
-                order[i], order[j] = order[j], order[i]
+        """The first mission of the run is never one that needs a rune (nothing could be finished). With vanilla runes The
+        Battle of Hyrule Field hands Remote Bombs out, so in an ordered story it comes before the missions that need them
+        (or they would wait on each other). Nothing else is restricted: logic waits for the rune (user, 2026-11-23)."""
+        if self._needs_rune(order[lo]):
+            j = self.random.choice([k for k in range(lo + 1, len(order)) if not self._needs_rune(order[k])
+                                    and order[k] not in CHAINED_MISSIONS and order[k] != FINAL_MISSION])
+            order[lo], order[j] = order[j], order[lo]
         source = MISSIONS[0].name
         if in_order and self.options.sheikah_runes == SheikahRunes.option_vanilla and source in order:
             first = min((order.index(m) for m in MISSION_RUNES if m in order), default=len(order))

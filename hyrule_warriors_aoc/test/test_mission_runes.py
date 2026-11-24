@@ -76,7 +76,7 @@ class TestVanillaRunes(Base):
         self.assertTrue(self.world.get_entrance(f"Start {URBOSA}").access_rule(state))
 
 
-class TestNeverAStartingMission(WorldTestBase):
+class TestFirstMissionPlayable(WorldTestBase):
     game = "Hyrule Warriors Age of Calamity"
     run_default_tests = False
 
@@ -95,12 +95,11 @@ class TestNeverAStartingMission(WorldTestBase):
                                 order = w.story_chain or w.mission_order
                                 self.assertEqual(sorted(w.mission_order), sorted(m.name for m in MISSIONS))
                                 self.assertNotIn(order[0], MISSION_RUNES)
-                                self.assertFalse(set(w.starting_unlocks) & set(MISSION_RUNES))
-                                if unlocks == "story_order":
-                                    self.assertNotIn(order[1], MISSION_RUNES)
-                                    if runes == "vanilla":
-                                        for m in MISSION_RUNES:
-                                            self.assertLess(order.index(HF), order.index(m))
+                                if w.starting_unlocks:  # others may need the bombs; the first one never does
+                                    self.assertNotIn(w.starting_unlocks[0], MISSION_RUNES)
+                                if unlocks == "story_order" and runes == "vanilla":
+                                    for m in MISSION_RUNES:
+                                        self.assertLess(order.index(HF), order.index(m))
 
 
 class TestClientTodo(TestCase):

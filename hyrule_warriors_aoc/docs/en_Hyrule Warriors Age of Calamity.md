@@ -136,7 +136,7 @@ Road to the Ancient Lab).
 
 Some missions can't be finished without a rune, and logic waits for it:
 
-- **Remote Bombs:** Revali, the Rito Warrior; Urbosa, the Gerudo Chief; When Courage Fails; Fleeing the Weather.
+- **Remote Bombs:** Revali, the Rito Warrior; Urbosa, the Gerudo Chief; When Courage Fails.
 - The matching rune for each Mastering challenge, and all four runes for EX Battle Research: Items.
 - If rods are items: the Fire Rod for EX Battle Research: Items and the Ice Rod for EX The Budget Battle.
 - Royal Ancient Lab (`lab_checks`): Remote Bombs for Power Play: Bombs Away, Magnesis for Magnetic Mayhem, Stasis for Go
@@ -150,7 +150,7 @@ Korok seeds and treasure chests that need one (the numbers are the ones in their
 | Stasis | Revali #7, Urbosa #7, Destroy the Yiga Clan! #2, When Courage Fails #1, Water and Fire #2, Air and Lightning #4, All Hyrule, United #6 | none |
 | Magnesis | none | Road to the Ancient Lab #2 and #6, Revali #3, Urbosa #9, The Yiga Clan Attacks! #8, The Road Home, Besieged #9, When Courage Fails #8, Air and Lightning #9, The Great Plateau #10, EX Battle of Goponga Village #5, EX Battle for Kakariko Village #6 |
 
-Universal Tracker uses the same logic. A mission that needs a rune is never one you start with, and `/todo`
+Universal Tracker uses the same logic. The very first mission of a run is always one you can finish, and `/todo`
 marks a story mission you can't finish yet.
 
 The unmodded game hands runes out whenever those story missions count as cleared, so the client installs a small game

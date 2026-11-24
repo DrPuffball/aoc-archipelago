@@ -30,7 +30,7 @@ really is this seed's (for example you played offline for a while).
 **I can't finish a mission: it needs Remote Bombs and I don't have them.**
 Revali, the Rito Warrior (rocks on the updrafts); Urbosa, the Gerudo Chief (defeat the Yiga with bombs); and When Courage
 Fails (topple the trees) can't be finished without them. Leave the mission and come back later: `!hint Rune: Remote Bombs`
-shows where they are. Seeds made before 0.9.93 could expect you to finish these without bombs; new seeds never do. If such
+shows where they are. Seeds made before 0.9.94 could expect you to finish these without bombs; new seeds never do. If such
 a seed is truly stuck, the host can send the rune with `/send <your name> Rune: Remote Bombs`.
 
 **Runes: the Sheikah Slate shows runes I don't have, or none of mine.**

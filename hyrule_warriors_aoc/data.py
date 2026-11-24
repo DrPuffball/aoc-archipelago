@@ -363,11 +363,10 @@ APPLES = "Apples"
 PALETTE_ITEMS = [*RODS, APPLES]  # client lock order; counter offsets in client.live_hook.PALETTE_USES
 # Challenges that can't be finished without a rune [game data 2026-11-23: each mission's objective and battle message
 # lists; REVERSE_ENGINEERING.md "Where a rune or rod is required"]. EX Battle Research: Items: "Attack with fire", "Use
-# rune counter" (which rune is not known: all four), "Defeat with Remote Bomb". Fleeing the Weather: its message list has
-# "Use Remote Bombs to topple trees"; guides don't mention it (demand more when unsure).
+# rune counter" (which rune is not known: all four), "Defeat with Remote Bomb". Not Fleeing the Weather: its message list
+# has "Use Remote Bombs to topple trees", but its objectives don't and both wikis describe the clear without it.
 RUNE_CHALLENGES = {"Mastering Remote Bombs": ("Remote Bombs",), "Mastering Cryonis": ("Cryonis",),
                    "Mastering Magnesis": ("Magnesis",), "Mastering Stasis": ("Stasis",),
-                   "Fleeing the Weather": ("Remote Bombs",),
                    "EX Battle Research: Items": tuple(RUNES)}
 # EX The Budget Battle: "Attack the Meteo Wizzrobe with ice". With rod_items the rod is an item.
 ROD_CHALLENGES = {"EX Battle Research: Items": ("Fire Rod",), "EX The Budget Battle": ("Ice Rod",)}

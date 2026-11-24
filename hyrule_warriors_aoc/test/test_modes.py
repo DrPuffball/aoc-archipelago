@@ -473,6 +473,7 @@ class ChallengesOnlyUnlockItemsTests(WorldTestBase):
     options = {"game_mode": "challenges_only", "challenge_unlock_order": "items"}
 
     def test_items_logic_and_client(self) -> None:
+        from ..data import RUNE_CHALLENGES
         from ..items import unlock_item
         from ..data_save import MISSION_RECORD_IDS
         from ..world import CHALLENGES_ONLY_ITEM_START
@@ -489,7 +490,13 @@ class ChallengesOnlyUnlockItemsTests(WorldTestBase):
         from BaseClasses import CollectionState
         state = CollectionState(self.multiworld)  # the start: precollected items only
         for c in w.starting_challenge_unlocks:  # playable from the start
-            self.assertTrue(self.multiworld.get_location(f"Event: Challenge {c}", self.player).can_reach(state), c)
+            reach = self.multiworld.get_location(f"Event: Challenge {c}", self.player).can_reach
+            if c in RUNE_CHALLENGES:  # (may start unlocked: the logic waits for its rune)
+                self.assertFalse(reach(state), c)
+                state = state.copy()
+                for rune in RUNE_CHALLENGES[c]:
+                    state.collect(self.world.create_item(f"Rune: {rune}"), True)
+            self.assertTrue(reach(state), c)
         session = Session(json.loads(json.dumps(w.fill_slot_data())))
         session.cleared_missions.add(MISSIONS[0].name)
         session.apply_received_item_names([unlock_item(c) for c in w.starting_challenge_unlocks])

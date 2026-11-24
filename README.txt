@@ -139,7 +139,7 @@ HOW THE RANDOMIZER WORKS
 - Side content opens at random by default: a few challenges and quests are open from the start and every completion
   opens 2-4 more (post-story ones included). Either kind can be set to the game's own order instead.
 - Rune requirements: Remote Bombs are needed to finish Revali, the Rito Warrior; Urbosa, the Gerudo Chief; and When
-  Courage Fails, so they are never your first missions. Some challenges, Royal Ancient Lab nodes, Korok seeds (14 of 134)
+  Courage Fails: logic makes sure the bombs are reachable before it expects these clears. Some challenges, Royal Ancient Lab nodes, Korok seeds (14 of 134)
   and treasure chests (14 of 181) need a rune or rod too. Logic and Universal Tracker know exactly which: the list comes
   from the game's own data (REVERSE_ENGINEERING.md). /todo marks a story mission you can't finish yet.
 - Story safety: Calamity Strikes needs Mipha, Daruk, Revali and Urbosa (the game traps any Champion you don't have
